@@ -123,9 +123,10 @@ async function downloadFFmpeg(destFolder) {
 
     try {
         execSync(
-            `"${ytDlpPath}" --no-continue --no-part --force-overwrites -f mp4 -o "${tempFile}" "${youtubeURL}"`,
+            `"${ytDlpPath}" --no-continue --no-part --force-overwrites -f "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]" -o "${tempFile}" "${youtubeURL}"`,
             { stdio: "inherit" }
         );
+
     } catch (err) {
         console.error("⛔ Erreur lors du téléchargement. Vérifie que yt-dlp.exe fonctionne.");
         process.exit(1);
