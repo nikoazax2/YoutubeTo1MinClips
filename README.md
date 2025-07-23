@@ -5,7 +5,7 @@ Tout se fait en local, sans dépendances globales, grâce à `yt-dlp` et `ffmpeg
 
 ## Installation
 
-1. Téléchargez le ZIP projet depuis [GitHub](https://github.com/nikoazax2/YoutubeTo1MinClips/archive/refs/heads/main.zip)
+1. Téléchargez le ZIP du projet ici : [YoutubeTo1MinClips.zip](https://github.com/nikoazax2/YoutubeTo1MinClips/archive/refs/heads/main.zip)
 2. Extrayez l'archive dans un dossier de votre choix
 3. Lancez l'exécutable `maindl.exe`
 
