@@ -3,6 +3,8 @@
 **YoutubeTo1MinClips** est un outil qui télécharge une vidéo YouTube, la découpe en clips de 1 minute maximum, et recadre les vidéos au format portrait (1080×1920) avec audio.  
 Tout se fait en local, sans dépendances globales, grâce à `yt-dlp` et `ffmpeg` inclus dans le projet.
 
+➡️ Le but est de faciliter la création de clips courts pour TikTok, Instagram Reels, ou YouTube Shorts à partir de vidéos YouTube.
+
 ## Installation
 
 1. Téléchargez le ZIP du projet ici : [YoutubeTo1MinClips.zip](https://github.com/nikoazax2/YoutubeTo1MinClips/archive/refs/heads/main.zip)
