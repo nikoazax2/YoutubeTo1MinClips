@@ -17,8 +17,21 @@ function ask(question) {
 }
 
 function toSeconds(time) {
-    const [m, s] = time.split(":").map(Number);
-    return m * 60 + s;
+    const parts = time.split(":").map(Number);
+    if (parts.length === 3) {
+        // hh:mm:ss
+        const [h, m, s] = parts;
+        return h * 3600 + m * 60 + s;
+    } else if (parts.length === 2) {
+        // mm:ss
+        const [m, s] = parts;
+        return m * 60 + s;
+    } else if (parts.length === 1) {
+        // ss
+        return parts[0];
+    } else {
+        return 0;
+    }
 }
 
 async function downloadFFmpeg(destFolder) {
@@ -90,8 +103,8 @@ async function downloadFFmpeg(destFolder) {
 
 (async () => {
     let youtubeURL = await ask("Lien YouTube : ");
-    const startTime = await ask("Timecode de début (mm:ss, laisser vide pour 00:00) : ");
-    const endTime = await ask("Timecode de fin (mm:ss, laisser vide pour toute la vidéo) : ");
+    const startTime = await ask("Timecode de début (hh:mm:ss ou mm:ss, laisser vide pour 00:00) : ");
+    const endTime = await ask("Timecode de fin (hh:mm:ss ou mm:ss, laisser vide pour toute la vidéo) : ");
     youtubeURL = youtubeURL || 'https://www.youtube.com/watch?v=y6120QOlsfU';
 
     const startSec = startTime ? toSeconds(startTime) : 0;
@@ -172,8 +185,16 @@ async function downloadFFmpeg(destFolder) {
 
     const baseName = path.basename(tempFile, path.extname(tempFile));
 
+    // Formatage des timecodes pour affichage
+    function formatTimecode(sec) {
+        const h = Math.floor(sec / 3600);
+        const m = Math.floor((sec % 3600) / 60);
+        const s = Math.floor(sec % 60);
+        return h > 0 ? `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}` : `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+    }
+
     console.log(
-        `\nDécoupe + crop + audio de la vidéo téléchargée de ${startTime || "00:00"} à ${endTime || "fin"} en ${numParts} parties.\n`
+        `\nDécoupe + crop + audio de la vidéo téléchargée de ${formatTimecode(startSec)} à ${endTime ? formatTimecode(endSec) : "fin"} en ${numParts} parties.\n`
     );
 
     for (let i = 0; i < numParts; i++) {
