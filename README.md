@@ -3,6 +3,14 @@
 **YoutubeTo1MinClips** est un outil qui télécharge une vidéo YouTube, la découpe en clips de 1 minute maximum, et recadre les vidéos au format portrait (1080×1920) avec audio.  
 Tout se fait en local, sans dépendances globales, grâce à `yt-dlp` et `ffmpeg` inclus dans le projet.
 
+## Installation
+
+1. Téléchargez le ZIP projet depuis [GitHub](https://github.com/nikoazax2/YoutubeTo1MinClips/archive/refs/heads/main.zip)
+2. Extrayez l'archive dans un dossier de votre choix
+3. Lancez l'exécutable `maindl.exe`
+
+C'est tout ! Le logiciel téléchargera automatiquement les binaires nécessaires (`yt-dlp.exe` et `ffmpeg.exe`) s'ils ne sont pas déjà présents dans le dossier.
+
 ## Fonctionnalités
 
 - Télécharge une vidéo YouTube au format `.mp4`
@@ -13,6 +21,7 @@ Tout se fait en local, sans dépendances globales, grâce à `yt-dlp` et `ffmpeg
 - Fonctionne avec un script Node.js ou un `.exe` Windows sans Node installé
 
 ## Structure du projet
+
 ```
 
 YoutubeTo1MinClips/
@@ -21,7 +30,7 @@ YoutubeTo1MinClips/
 ├── ffmpeg.exe # Binaire ffmpeg (Windows)
 ├── maindl.exe # (optionnel) Exécutable compilé avec pkg
 
-````
+```
 
 ## Pré-requis
 
@@ -37,7 +46,7 @@ YoutubeTo1MinClips/
 
 ```bash
 node maindl.js
-````
+```
 
 ### Avec l’exécutable
 
