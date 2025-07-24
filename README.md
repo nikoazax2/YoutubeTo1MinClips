@@ -1,6 +1,6 @@
 # YoutubeTo1MinClips
 
-**YoutubeTo1MinClips** est un outil qui télécharge une vidéo YouTube, la découpe en clips de 1 minute maximum, et recadre les vidéos au format portrait (1080×1920) avec audio.  
+**YoutubeTo1MinClips** est un outil qui télécharge une vidéo YouTube, la découpe en clips de 1 minute maximum, et recadre les vidéos au format portrait (1080×1920) **ou ajoute des bandes floutées en paysage** avec audio.  
 Tout se fait en local, sans dépendances globales, grâce à `yt-dlp` et `ffmpeg` inclus dans le projet.
 
 ➡️ Le but est de faciliter la création de clips courts pour TikTok, Instagram Reels, ou YouTube Shorts à partir de vidéos YouTube.
@@ -18,7 +18,9 @@ C'est tout ! Le logiciel téléchargera automatiquement les binaires nécessaire
 - Télécharge une vidéo YouTube au format `.mp4`
 - Découpe la vidéo entre deux timecodes spécifiés (début et fin)
 - Génère plusieurs clips de 1 minute maximum chacun
-- Recadre les vidéos au format portrait 9:16 (1080×1920)
+- **Deux modes de recadrage vidéo :**
+  - **Portrait 9:16 (1080×1920)**
+  - **Paysage avec bandes floutées (blur fill)** pour conserver l'intégralité de l'image sans crop
 - Conserve l’audio
 - Fonctionne avec un script Node.js ou un `.exe` Windows sans Node installé
 
@@ -56,22 +58,29 @@ node maindl.js
 ./maindl.exe
 ```
 
+
 Le programme vous demandera :
 
 - le lien YouTube
 - le timecode de début (exemple : `00:00`)
 - le timecode de fin (exemple : `05:00`)
+- le format de sortie :
+  - **1** : téléphone recadré (portrait 9:16)
+  - **2** : paysage avec bandes floutées (blur fill)
 
 Puis il produira plusieurs fichiers dans le même dossier, par exemple :
 
 ```
 video_temp_part1_portrait.mp4
 video_temp_part2_portrait.mp4
+video_temp_part1_blurfill.mp4
+video_temp_part2_blurfill.mp4
 …
 ```
 
 ## Notes
 
 - Les vidéos sont découpées proprement avec FFmpeg pour une qualité optimale.
+- Le mode "bandes floutées" (blur fill) permet de générer des vidéos paysage adaptées aux réseaux sociaux tout en gardant l'intégralité de l'image.
 - Les sous-titres automatiques TikTok ne sont pas générés par cet outil.
 - Ce projet est conçu pour Windows. Une adaptation pour Linux/Mac est possible en utilisant les binaires appropriés.
