@@ -19,15 +19,12 @@ function ask(question) {
 function toSeconds(time) {
     const parts = time.split(":").map(Number);
     if (parts.length === 3) {
-        // hh:mm:ss
         const [h, m, s] = parts;
         return h * 3600 + m * 60 + s;
     } else if (parts.length === 2) {
-        // mm:ss
         const [m, s] = parts;
         return m * 60 + s;
     } else if (parts.length === 1) {
-        // ss
         return parts[0];
     } else {
         return 0;
@@ -37,53 +34,34 @@ function toSeconds(time) {
 async function downloadFFmpeg(destFolder) {
     console.log("\nffmpeg.exe introuvable. Téléchargement en cours…");
     const zipPath = path.join(destFolder, "ffmpeg.zip");
-    const ffmpegUrl =
-        "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-7.0.2-essentials_build.zip";
+    const ffmpegUrl = "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-7.0.2-essentials_build.zip";
 
     await new Promise((resolve, reject) => {
         const file = fs.createWriteStream(zipPath);
-        const options = {
-            headers: {
-                "User-Agent": "Mozilla/5.0",
-            },
-        };
+        const options = { headers: { "User-Agent": "Mozilla/5.0" } };
 
-        https
-            .get(ffmpegUrl, options, (response) => {
-                if (response.statusCode !== 200) {
-                    reject(new Error(`Échec téléchargement : HTTP ${response.statusCode}`));
-                    return;
-                }
+        https.get(ffmpegUrl, options, (response) => {
+            if (response.statusCode !== 200) {
+                reject(new Error(`Échec téléchargement : HTTP ${response.statusCode}`));
+                return;
+            }
 
-                response.pipe(file);
-                file.on("finish", () => {
-                    file.close(resolve);
-                });
-            })
-            .on("error", (err) => {
-                if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
-                reject(err);
-            });
+            response.pipe(file);
+            file.on("finish", () => file.close(resolve));
+        }).on("error", (err) => {
+            if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
+            reject(err);
+        });
     });
 
     console.log("✅ Archive téléchargée. Extraction…");
 
-    await fs
-        .createReadStream(zipPath)
-        .pipe(unzipper.Extract({ path: destFolder }))
-        .promise();
+    await fs.createReadStream(zipPath).pipe(unzipper.Extract({ path: destFolder })).promise();
 
-    const folders = fs
-        .readdirSync(destFolder)
-        .filter((f) => fs.statSync(path.join(destFolder, f)).isDirectory());
+    const folders = fs.readdirSync(destFolder).filter((f) => fs.statSync(path.join(destFolder, f)).isDirectory());
     let found = false;
     for (const folder of folders) {
-        const ffmpegCandidate = path.join(
-            destFolder,
-            folder,
-            "bin",
-            "ffmpeg.exe"
-        );
+        const ffmpegCandidate = path.join(destFolder, folder, "bin", "ffmpeg.exe");
         if (fs.existsSync(ffmpegCandidate)) {
             fs.copyFileSync(ffmpegCandidate, path.join(destFolder, "ffmpeg.exe"));
             found = true;
@@ -105,17 +83,15 @@ async function downloadFFmpeg(destFolder) {
     let youtubeURL = await ask("Lien YouTube : ");
     const startTime = await ask("Timecode de début (hh:mm:ss ou mm:ss, laisser vide pour 00:00) : ");
     const endTime = await ask("Timecode de fin (hh:mm:ss ou mm:ss, laisser vide pour toute la vidéo) : ");
+    const formatChoice = await ask("Souhaites-tu le format téléphone recadré (1) ou paysage avec bandes floutées (2) ? (1/2, défaut : 1) : ");
+    const useBlurFill = formatChoice.trim() === "2";
+
     youtubeURL = youtubeURL || 'https://www.youtube.com/watch?v=y6120QOlsfU';
 
     const startSec = startTime ? toSeconds(startTime) : 0;
-
     const tempFile = "video_temp.mp4";
 
-    const exeDir =
-        process.pkg !== undefined
-            ? path.dirname(process.execPath)
-            : __dirname;
-
+    const exeDir = process.pkg !== undefined ? path.dirname(process.execPath) : __dirname;
     const ytDlpPath = path.join(exeDir, "yt-dlp.exe");
     const ffmpegPath = path.join(exeDir, "ffmpeg.exe");
 
@@ -130,16 +106,13 @@ async function downloadFFmpeg(destFolder) {
 
     console.log("\n⬇️ Téléchargement de la vidéo…");
 
-    if (fs.existsSync(tempFile)) {
-        fs.unlinkSync(tempFile);
-    }
+    if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
 
     try {
         execSync(
             `"${ytDlpPath}" --no-continue --no-part --force-overwrites -f "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]" -o "${tempFile}" "${youtubeURL}"`,
             { stdio: "inherit" }
         );
-
     } catch (err) {
         console.error("⛔ Erreur lors du téléchargement. Vérifie que yt-dlp.exe fonctionne.");
         process.exit(1);
@@ -182,20 +155,18 @@ async function downloadFFmpeg(destFolder) {
 
     const duration = endSec - startSec;
     const numParts = Math.ceil(duration / 60);
-
     const baseName = path.basename(tempFile, path.extname(tempFile));
 
-    // Formatage des timecodes pour affichage
     function formatTimecode(sec) {
         const h = Math.floor(sec / 3600);
         const m = Math.floor((sec % 3600) / 60);
         const s = Math.floor(sec % 60);
-        return h > 0 ? `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}` : `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+        return h > 0
+            ? `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`
+            : `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
     }
 
-    console.log(
-        `\nDécoupe + crop + audio de la vidéo téléchargée de ${formatTimecode(startSec)} à ${endTime ? formatTimecode(endSec) : "fin"} en ${numParts} parties.\n`
-    );
+    console.log(`\nDécoupe + format vidéo de ${formatTimecode(startSec)} à ${formatTimecode(endSec)} en ${numParts} parties.\n`);
 
     for (let i = 0; i < numParts; i++) {
         const partStart = startSec + i * 60;
@@ -204,9 +175,20 @@ async function downloadFFmpeg(destFolder) {
             partDuration = endSec - partStart;
         }
 
-        const output = `${baseName}_part${i + 1}_portrait.mp4`;
+        const output = `${baseName}_part${i + 1}_${useBlurFill ? "blurfill" : "portrait"}.mp4`;
 
-        const cropFilter = `"crop='min(iw,ih*9/16)':'min(ih,iw*16/9)':(iw-ow)/2:(ih-oh)/2,scale=1080:1920"`;
+        const cropFilter = useBlurFill
+            ? `"split=2[main][bg];` +
+            `[main]scale=1080:-1[fg];` +
+            `[bg]scale=1080:1920:force_original_aspect_ratio=increase,boxblur=10:1,crop=1080:1920[blurred];` +
+            `[blurred][fg]overlay=(W-w)/2:(H-h)/2"`
+            : `"crop='min(iw,ih*9/16)':'min(ih,iw*16/9)':` +
+            `(iw-ow)/2:(ih-oh)/2,scale=1080:1920"`;
+
+
+
+
+
 
         const cmd =
             `"${ffmpegPath}" -y -ss ${partStart} -t ${partDuration} -i "${tempFile}" ` +
