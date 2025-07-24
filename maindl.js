@@ -80,16 +80,26 @@ async function downloadFFmpeg(destFolder) {
 }
 
 (async () => {
-    let youtubeURL = await ask("Lien YouTube : ");
+    const tempFile = "video_temp.mp4";
+
+    let videoExists = fs.existsSync(tempFile) && fs.statSync(tempFile).size > 1000;
+
+    let youtubeURL;
+    if (!videoExists) {
+        youtubeURL = await ask("Lien YouTube : ");
+    } else {
+        const useExistingVideo = await ask("Une vidéo a déjà été téléchargée. Souhaites-tu la réutiliser ? (o/n) : ");
+        if (useExistingVideo.toLowerCase() === "n") {
+            youtubeURL = await ask("Lien YouTube : ");
+        }
+    }
+
     const startTime = await ask("Timecode de début (hh:mm:ss ou mm:ss, laisser vide pour 00:00) : ");
     const endTime = await ask("Timecode de fin (hh:mm:ss ou mm:ss, laisser vide pour toute la vidéo) : ");
     const formatChoice = await ask("Souhaites-tu le format téléphone recadré (1) ou paysage avec bandes floutées (2) ? (1/2, défaut : 1) : ");
     const useBlurFill = formatChoice.trim() === "2";
 
-    youtubeURL = youtubeURL || 'https://www.youtube.com/watch?v=y6120QOlsfU';
-
     const startSec = startTime ? toSeconds(startTime) : 0;
-    const tempFile = "video_temp.mp4";
 
     const exeDir = process.pkg !== undefined ? path.dirname(process.execPath) : __dirname;
     const ytDlpPath = path.join(exeDir, "yt-dlp.exe");
@@ -104,26 +114,31 @@ async function downloadFFmpeg(destFolder) {
         await downloadFFmpeg(exeDir);
     }
 
-    console.log("\n⬇️ Téléchargement de la vidéo…");
+    // Vérification si le fichier vidéo existe déjà
+    if (!videoExists) {
+        console.log("\n⬇️ Téléchargement de la vidéo…");
 
-    if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+        if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
 
-    try {
-        execSync(
-            `"${ytDlpPath}" --no-continue --no-part --force-overwrites -f "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]" -o "${tempFile}" "${youtubeURL}"`,
-            { stdio: "inherit" }
-        );
-    } catch (err) {
-        console.error("⛔ Erreur lors du téléchargement. Vérifie que yt-dlp.exe fonctionne.");
-        process.exit(1);
+        try {
+            execSync(
+                `"${ytDlpPath}" --no-continue --no-part --force-overwrites -f "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]" -o "${tempFile}" "${youtubeURL}"`,
+                { stdio: "inherit" }
+            );
+        } catch (err) {
+            console.error("⛔ Erreur lors du téléchargement. Vérifie que yt-dlp.exe fonctionne.");
+            process.exit(1);
+        }
+
+        if (!fs.existsSync(tempFile) || fs.statSync(tempFile).size < 1000) {
+            console.error("⛔ Le fichier vidéo est vide ou invalide.");
+            process.exit(1);
+        }
+
+        console.log("✅ Téléchargement terminé.");
+    } else {
+        console.log("✅ Vidéo déjà téléchargée. Utilisation du fichier existant.");
     }
-
-    if (!fs.existsSync(tempFile) || fs.statSync(tempFile).size < 1000) {
-        console.error("⛔ Le fichier vidéo est vide ou invalide.");
-        process.exit(1);
-    }
-
-    console.log("✅ Téléchargement terminé.");
 
     let endSec;
 
@@ -185,11 +200,6 @@ async function downloadFFmpeg(destFolder) {
             : `"crop='min(iw,ih*9/16)':'min(ih,iw*16/9)':` +
             `(iw-ow)/2:(ih-oh)/2,scale=1080:1920"`;
 
-
-
-
-
-
         const cmd =
             `"${ffmpegPath}" -y -ss ${partStart} -t ${partDuration} -i "${tempFile}" ` +
             `-vf ${cropFilter} -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k "${output}"`;
@@ -203,7 +213,11 @@ async function downloadFFmpeg(destFolder) {
         }
     }
 
-    fs.unlinkSync(tempFile);
+    const deleteFile = await ask("Souhaites-tu supprimer la vidéo téléchargée (video_temp.mp4) ? (o/n) : ");
+    if (deleteFile.toLowerCase() === 'o') {
+        fs.unlinkSync(tempFile);
+        console.log("✅ Vidéo supprimée.");
+    }
 
     console.log("\n✅ Tout est terminé avec succès !");
     await ask("\nAppuie sur Entrée pour quitter...");
