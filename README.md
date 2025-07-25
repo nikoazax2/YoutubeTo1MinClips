@@ -44,6 +44,10 @@ YoutubeTo1MinClips/
   - Aucun pré-requis
   - Les binaires `ffmpeg.exe` et `yt-dlp.exe` doivent être dans le même dossier que le script ou l’exécutable
 
+## Mise à jour
+
+Pour mettre à jour le projet, il suffit d'ouvrir l'exécutable `update.exe` présent dans le dossier. Celui-ci récupérera automatiquement la dernière version disponible.
+
 ## Utilisation
 
 ### Avec Node.js
