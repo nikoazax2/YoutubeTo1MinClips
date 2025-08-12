@@ -99,6 +99,12 @@ async function downloadFFmpeg(destFolder) {
   );
   const useBlurFill = formatChoice.trim() === "2";
 
+  // option: découper automatiquement les plages en segments de 60 secondes
+  const autoSplitAns = await ask(
+    "Découper automatiquement les plages en segments de 60s ? (o/N) : "
+  );
+  const autoSplit = autoSplitAns.trim().toLowerCase() === "o";
+
   const exeDir = process.pkg ? path.dirname(process.execPath) : __dirname;
   const ytDlp = path.join(exeDir, "yt-dlp.exe");
   const ffmpeg = path.join(exeDir, "ffmpeg.exe");
@@ -141,6 +147,23 @@ async function downloadFFmpeg(destFolder) {
       return { start: toSeconds(s), end: toSeconds(e) };
     });
 
+  // expansion en segments de 60s si demandé (le dernier segment peut être <60s)
+  const expandedRanges = autoSplit
+    ? ranges.flatMap(({ start, end }) => {
+        const segments = [];
+        if (end <= start) return segments;
+        let cur = start;
+        while (cur + 60 <= end) {
+          segments.push({ start: cur, end: cur + 60 });
+          cur += 60;
+        }
+        if (cur < end) segments.push({ start: cur, end });
+        return segments;
+      })
+    : ranges;
+
+  console.log(`\n🧩 Segments à traiter: ${expandedRanges.length}`);
+
   // filtre FFmpeg corrigé
   const cropFilter = useBlurFill
     ? `"split=2[main][bg];` +
@@ -150,8 +173,8 @@ async function downloadFFmpeg(destFolder) {
     : `"crop='min(iw,ih*9/16)':'min(ih,iw*16/9)':(iw-ow)/2:(ih-oh)/2,scale=1080:1920"`;
 
   // traitement de chaque plage
-  for (let i = 0; i < ranges.length; i++) {
-    const { start, end } = ranges[i];
+  for (let i = 0; i < expandedRanges.length; i++) {
+    const { start, end } = expandedRanges[i];
     if (end <= start) {
       console.warn(`⚠️ Plage ${i + 1} ignorée (fin ≤ début).`);
       continue;
