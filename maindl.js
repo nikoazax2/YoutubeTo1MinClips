@@ -169,7 +169,7 @@ async function downloadFFmpeg(destFolder) {
     const cropFilter = useBlurFill
         ? `"split=2[main][bg];` +
         `[main]scale=1080:-1[fg];` +
-        `[bg]scale=1080:1920:force_original_aspect_ratio=increase,boxblur=10:1,crop=1080:1920[bl];` +
+        `[bg]scale=1080:1920:force_original_aspect_ratio=increase,boxblur=20:1,crop=1080:1920[bl];` +
         `[bl][fg]overlay=(W-w)/2:(H-h)/2"`
         : `"crop='min(iw,ih*9/16)':'min(ih,iw*16/9)':(iw-ow)/2:(ih-oh)/2,scale=1080:1920"`;
 
