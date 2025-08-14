@@ -77,7 +77,11 @@ async function downloadFFmpeg(destFolder) {
 }
 
 (async () => {
-    const tempFile = "video_temp.mp4";
+    const exeDir = process.pkg ? path.dirname(process.execPath) : process.cwd();
+    const ytDlp = path.join(exeDir, "yt-dlp.exe");
+    const ffmpeg = path.join(exeDir, "ffmpeg.exe");
+    const tempFile = path.join(exeDir, "video_temp.mp4");
+
     let videoExists = fs.existsSync(tempFile) && fs.statSync(tempFile).size > 1000;
 
     let youtubeURL;
@@ -86,6 +90,7 @@ async function downloadFFmpeg(destFolder) {
     } else {
         const reuse = await ask("Une vidéo existe déjà. La réutiliser ? (o/n) : ");
         if (reuse.toLowerCase() === "n") {
+            videoExists = false; // Indique qu'il n'y a pas de vidéo existante à réutiliser
             youtubeURL = await ask("Lien YouTube : ");
         }
     }
@@ -104,10 +109,6 @@ async function downloadFFmpeg(destFolder) {
         "Découper automatiquement les plages en segments de 60s ? (O/n) : "
     );
     const autoSplit = autoSplitAns.trim().toLowerCase() !== "n";
-
-    const exeDir = process.pkg ? path.dirname(process.execPath) : __dirname;
-    const ytDlp = path.join(exeDir, "yt-dlp.exe");
-    const ffmpeg = path.join(exeDir, "ffmpeg.exe");
 
     if (!fs.existsSync(ytDlp)) {
         console.error("⛔ yt-dlp.exe introuvable.");
@@ -172,6 +173,26 @@ async function downloadFFmpeg(destFolder) {
         `[bl][fg]overlay=(W-w)/2:(H-h)/2"`
         : `"crop='min(iw,ih*9/16)':'min(ih,iw*16/9)':(iw-ow)/2:(ih-oh)/2,scale=1080:1920"`;
 
+    // Ajout de la logique pour créer un sous-dossier spécifique
+    const videoName = youtubeURL ? youtubeURL.split('v=')[1] || 'video' : 'video';
+    const downloadDate = new Date().toISOString().split('T')[0];
+    let videoTitle = "video";
+    if (youtubeURL) {
+        try {
+            const metadata = execSync(`"${ytDlp}" --get-title "${youtubeURL}"`, { encoding: "utf-8" });
+            videoTitle = metadata.trim().replace(/[^a-zA-Z0-9-_ ]/g, "_"); // Nettoyage du titre
+        } catch {
+            console.warn("⚠️ Impossible de récupérer le titre de la vidéo. Utilisation du nom par défaut.");
+        }
+    }
+    // Mise à jour pour remplacer les espaces par des underscores dans le titre
+    videoTitle = 'output_' + videoTitle.replace(/\s+/g, "_");
+    // Mise à jour pour gérer correctement les chemins dans les deux cas (Node.js et .exe)
+    const outputDir = path.join(exeDir, `${videoTitle}_${downloadDate}`);
+    if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir);
+    }
+
     // traitement de chaque plage
     for (let i = 0; i < expandedRanges.length; i++) {
         const { start, end } = expandedRanges[i];
@@ -180,7 +201,7 @@ async function downloadFFmpeg(destFolder) {
             continue;
         }
         const duration = end - start;
-        const outName = `segment_${i + 1}_${start}s_${end}s_${useBlurFill ? "blur" : "crop"}.mp4`;
+        const outName = path.join(outputDir, `segment_${i + 1}_${start}s_${end}s_${useBlurFill ? "blur" : "crop"}.mp4`);
 
         const cmd =
             `"${ffmpeg}" -y -ss ${start} -t ${duration} -i "${tempFile}" ` +
