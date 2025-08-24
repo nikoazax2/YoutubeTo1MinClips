@@ -122,15 +122,36 @@ async function downloadFFmpeg(destFolder) {
     if (!videoExists) {
         console.log("\n⬇️ Téléchargement de la vidéo…");
         if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
-        try {
-            execSync(
-                `"${ytDlp}" --no-continue --no-part --force-overwrites ` +
-                `-f "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]" ` +
-                `-o "${tempFile}" "${youtubeURL}"`,
-                { stdio: "inherit" }
-            );
-        } catch {
-            console.error("⛔ Erreur de téléchargement.");
+        let formatString = "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]";
+        let downloadSuccess = false;
+        let tryCount = 0;
+        while (!downloadSuccess && tryCount < 2) {
+            try {
+                execSync(
+                    `"${ytDlp}" --no-continue --no-part --force-overwrites -f "${formatString}" -o "${tempFile}" "${youtubeURL}"`,
+                    { stdio: "inherit" }
+                );
+                downloadSuccess = true;
+            } catch {
+                tryCount++;
+                console.error("⛔ Erreur de téléchargement. Format demandé non disponible.");
+                // Affiche la liste des formats disponibles
+                console.log("\nListe des formats disponibles :\n");
+                try {
+                    execSync(`"${ytDlp}" --list-formats "${youtubeURL}"`, { stdio: "inherit" });
+                } catch {
+                    console.error("Impossible d'obtenir la liste des formats.");
+                    process.exit(1);
+                }
+                formatString = await ask("Saisis le code du format à utiliser (ex: 22, 18, 137+140) : ");
+                if (!formatString) {
+                    console.error("⛔ Aucun format saisi.");
+                    process.exit(1);
+                }
+            }
+        }
+        if (!downloadSuccess) {
+            console.error("⛔ Erreur lors du téléchargement. Vérifie que yt-dlp.exe fonctionne.");
             process.exit(1);
         }
         console.log("✅ Vidéo téléchargée.");
