@@ -125,6 +125,9 @@ async function downloadFFmpeg(destFolder) {
         let formatString = "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]";
         let downloadSuccess = false;
         let tryCount = 0;
+        let separateDownload = false;
+        let videoFormat = "";
+        let audioFormat = "";
         while (!downloadSuccess && tryCount < 2) {
             try {
                 execSync(
@@ -143,18 +146,44 @@ async function downloadFFmpeg(destFolder) {
                     console.error("Impossible d'obtenir la liste des formats.");
                     process.exit(1);
                 }
-                formatString = await ask("Saisis le code du format à utiliser (ex: 22, 18, 137+140) : ");
-                if (!formatString) {
+                // Demande à l'utilisateur les formats vidéo et audio séparés
+                videoFormat = await ask("Code du format vidéo (ex: 232) : ");
+                audioFormat = await ask("Code du format audio (ex: 233-1) : ");
+                if (!videoFormat || !audioFormat) {
                     console.error("⛔ Aucun format saisi.");
                     process.exit(1);
                 }
+                separateDownload = true;
+                break;
+            }
+        }
+        if (!downloadSuccess && separateDownload) {
+            // Téléchargement séparé vidéo et audio
+            const tempVideo = path.join(exeDir, "video_temp_onlyvideo.mp4");
+            const tempAudio = path.join(exeDir, "video_temp_onlyaudio.m4a");
+            try {
+                execSync(`"${ytDlp}" --no-continue --no-part --force-overwrites -f "${videoFormat}" -o "${tempVideo}" "${youtubeURL}"`, { stdio: "inherit" });
+                execSync(`"${ytDlp}" --no-continue --no-part --force-overwrites -f "${audioFormat}" -o "${tempAudio}" "${youtubeURL}"`, { stdio: "inherit" });
+            } catch {
+                console.error("⛔ Erreur lors du téléchargement séparé vidéo ou audio.");
+                process.exit(1);
+            }
+            // Fusionne vidéo et audio avec ffmpeg
+            try {
+                execSync(`"${ffmpeg}" -y -i "${tempVideo}" -i "${tempAudio}" -c:v copy -c:a aac -b:a 128k "${tempFile}"`, { stdio: "inherit" });
+                fs.unlinkSync(tempVideo);
+                fs.unlinkSync(tempAudio);
+                downloadSuccess = true;
+            } catch {
+                console.error("⛔ Erreur lors de la fusion vidéo+audio avec ffmpeg.");
+                process.exit(1);
             }
         }
         if (!downloadSuccess) {
             console.error("⛔ Erreur lors du téléchargement. Vérifie que yt-dlp.exe fonctionne.");
             process.exit(1);
         }
-        console.log("✅ Vidéo téléchargée.");
+        console.log("✅ Vidéo téléchargée et fusionnée.");
     } else {
         console.log("✅ Réutilisation de video_temp.mp4");
     }
