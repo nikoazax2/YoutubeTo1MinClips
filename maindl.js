@@ -93,7 +93,7 @@ async function downloadFFmpeg(destFolder) {
             videoExists = false; // Indique qu'il n'y a pas de vidéo existante à réutiliser
             youtubeURL = await ask("Lien YouTube : ");
         }
-    }
+    } 
 
     // Demande si on veut toute la vidéo
     const allVideoAns = await ask("Prendre toute la vidéo ? (o/n) : ");
