@@ -95,20 +95,25 @@ async function downloadFFmpeg(destFolder) {
         }
     }
 
-    // on demande plusieurs plages
-    const rangesInput = await ask(
-        "Saisis les plages (hh:mm:ss-hh:mm:ss, séparées par des virgules) :\n"
-    );
-    const formatChoice = await ask(
-        "Format téléphone recadré (1) ou paysage + bandes floutées (2) ? (1/2, défaut=1) : "
-    );
-    const useBlurFill = formatChoice.trim() === "2";
-
-    // option: découper automatiquement les plages en segments de 60 secondes
-    const autoSplitAns = await ask(
-        "Découper automatiquement les plages en segments de 60s ? (O/n) : "
-    );
-    const autoSplit = autoSplitAns.trim().toLowerCase() !== "n";
+    // Demande si on veut toute la vidéo
+    const allVideoAns = await ask("Prendre toute la vidéo ? (o/n) : ");
+    let rangesInput = "";
+    let useAllVideo = allVideoAns.trim().toLowerCase() === "o";
+    let formatChoice, useBlurFill, autoSplitAns, autoSplit;
+    if (useAllVideo) {
+        // On prendra toute la vidéo, on déterminera la durée plus tard
+        formatChoice = await ask("Format téléphone recadré (1) ou paysage + bandes floutées (2) ? (1/2, défaut=1) : ");
+        useBlurFill = formatChoice.trim() === "2";
+        autoSplitAns = await ask("Découper automatiquement la vidéo en segments de 60s ? (O/n) : ");
+        autoSplit = autoSplitAns.trim().toLowerCase() !== "n";
+    } else {
+        // On demande les plages
+        rangesInput = await ask("Saisis les plages (hh:mm:ss-hh:mm:ss, séparées par des virgules) :\n");
+        formatChoice = await ask("Format téléphone recadré (1) ou paysage + bandes floutées (2) ? (1/2, défaut=1) : ");
+        useBlurFill = formatChoice.trim() === "2";
+        autoSplitAns = await ask("Découper automatiquement les plages en segments de 60s ? (O/n) : ");
+        autoSplit = autoSplitAns.trim().toLowerCase() !== "n";
+    }
 
     if (!fs.existsSync(ytDlp)) {
         console.error("⛔ yt-dlp.exe introuvable.");
@@ -189,29 +194,57 @@ async function downloadFFmpeg(destFolder) {
     }
 
     // parse des plages
-    const ranges = rangesInput
-        .split(",")
-        .map(r => r.trim())
-        .filter(r => r.includes("-"))
-        .map(r => {
-            const [s, e] = r.split("-");
-            return { start: toSeconds(s), end: toSeconds(e) };
-        });
-
-    // expansion en segments de 60s si demandé (le dernier segment peut être <60s)
-    const expandedRanges = autoSplit
-        ? ranges.flatMap(({ start, end }) => {
-            const segments = [];
-            if (end <= start) return segments;
-            let cur = start;
-            while (cur + 60 <= end) {
-                segments.push({ start: cur, end: cur + 60 });
+    let expandedRanges = [];
+    if (useAllVideo) {
+        // Détermine la durée de la vidéo
+        let videoDuration = 0;
+        try {
+            const ffprobeOut = execSync(`"${ffmpeg}" -i "${tempFile}" -hide_banner`, { stdio: "pipe" });
+        } catch (err) {
+            const output = err.stderr ? err.stderr.toString() : "";
+            const match = output.match(/Duration: (\d+):(\d+):(\d+\.\d+)/);
+            if (match) {
+                const [, h, m, s] = match;
+                videoDuration = (+h) * 3600 + (+m) * 60 + (+s);
+            } else {
+                console.error("⛔ Impossible de déterminer la durée de la vidéo.");
+                process.exit(1);
+            }
+        }
+        if (autoSplit) {
+            expandedRanges = [];
+            let cur = 0;
+            while (cur + 60 <= videoDuration) {
+                expandedRanges.push({ start: cur, end: cur + 60 });
                 cur += 60;
             }
-            if (cur < end) segments.push({ start: cur, end });
-            return segments;
-        })
-        : ranges;
+            if (cur < videoDuration) expandedRanges.push({ start: cur, end: videoDuration });
+        } else {
+            expandedRanges = [{ start: 0, end: videoDuration }];
+        }
+    } else {
+        const ranges = rangesInput
+            .split(",")
+            .map(r => r.trim())
+            .filter(r => r.includes("-"))
+            .map(r => {
+                const [s, e] = r.split("-");
+                return { start: toSeconds(s), end: toSeconds(e) };
+            });
+        expandedRanges = autoSplit
+            ? ranges.flatMap(({ start, end }) => {
+                const segments = [];
+                if (end <= start) return segments;
+                let cur = start;
+                while (cur + 60 <= end) {
+                    segments.push({ start: cur, end: cur + 60 });
+                    cur += 60;
+                }
+                if (cur < end) segments.push({ start: cur, end });
+                return segments;
+            })
+            : ranges;
+    }
 
     console.log(`\n🧩 Segments à traiter: ${expandedRanges.length}`);
 
