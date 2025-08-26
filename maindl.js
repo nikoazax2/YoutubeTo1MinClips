@@ -131,8 +131,8 @@ async function downloadFFmpeg(destFolder) {
         let downloadSuccess = false;
         let tryCount = 0;
         let separateDownload = false;
-        let videoFormat = "";
-        let audioFormat = "";
+        let videoFormat = "609"; // Default video format ID
+        let audioFormat = "234"; // Default audio format ID
         while (!downloadSuccess && tryCount < 2) {
             try {
                 execSync(
