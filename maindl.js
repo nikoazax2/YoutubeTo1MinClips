@@ -193,6 +193,20 @@ async function downloadFFmpeg(destFolder) {
         console.log("✅ Réutilisation de video_temp.mp4");
     }
 
+    // Accélération de la vidéo de 1,5 %
+    const acceleratedFile = path.join(exeDir, "video_temp_accelerated.mp4");
+    try {
+        console.log("\n⚡ Accélération de la vidéo de 1,5 %...");
+        execSync(
+            `"${ffmpeg}" -y -i "${tempFile}" -filter:v "setpts=0.985*PTS" -filter:a "atempo=1.015" "${acceleratedFile}"`,
+            { stdio: "inherit" }
+        );
+        console.log("✅ Vidéo accélérée enregistrée sous video_temp_accelerated.mp4");
+    } catch {
+        console.error("⛔ Échec de l'accélération de la vidéo.");
+        process.exit(1);
+    }
+
     // parse des plages
     let expandedRanges = [];
     if (useAllVideo) {
