@@ -225,12 +225,15 @@ async function downloadFFmpeg(destFolder) {
                 process.exit(1);
             }
         }
+        // Pour que chaque segment fasse 1 min après accélération, on découpe par 60 / 0.985 ≈ 60.91 secondes
+        const accelFactor = 0.985;
+        const targetSegment = 60 / accelFactor; // ≈ 60.91
         if (autoSplit) {
             expandedRanges = [];
             let cur = 0;
-            while (cur + 60 <= videoDuration) {
-                expandedRanges.push({ start: cur, end: cur + 60 });
-                cur += 60;
+            while (cur + targetSegment <= videoDuration) {
+                expandedRanges.push({ start: cur, end: cur + targetSegment });
+                cur += targetSegment;
             }
             if (cur < videoDuration) expandedRanges.push({ start: cur, end: videoDuration });
         } else {
@@ -245,14 +248,17 @@ async function downloadFFmpeg(destFolder) {
                 const [s, e] = r.split("-");
                 return { start: toSeconds(s), end: toSeconds(e) };
             });
+        // Pour que chaque segment fasse 1 min après accélération, on découpe par 60 / 0.985 ≈ 60.91 secondes
+        const accelFactor = 0.985;
+        const targetSegment = 60 / accelFactor; // ≈ 60.91
         expandedRanges = autoSplit
             ? ranges.flatMap(({ start, end }) => {
                 const segments = [];
                 if (end <= start) return segments;
                 let cur = start;
-                while (cur + 60 <= end) {
-                    segments.push({ start: cur, end: cur + 60 });
-                    cur += 60;
+                while (cur + targetSegment <= end) {
+                    segments.push({ start: cur, end: cur + targetSegment });
+                    cur += targetSegment;
                 }
                 if (cur < end) segments.push({ start: cur, end });
                 return segments;
@@ -300,8 +306,9 @@ async function downloadFFmpeg(destFolder) {
         const duration = end - start;
         const outName = path.join(outputDir, `segment_${i + 1}_${start}s_${end}s_${useBlurFill ? "blur" : "crop"}.mp4`);
 
+        // Utilisation de la vidéo accélérée pour les découpes
         const cmd =
-            `"${ffmpeg}" -y -ss ${start} -t ${duration} -i "${tempFile}" ` +
+            `"${ffmpeg}" -y -ss ${start} -t ${duration} -i "${acceleratedFile}" ` +
             `-vf ${cropFilter} -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k "${outName}"`;
 
         console.log(`\n🔄 Traitement plage #${i + 1} → ${outName}`);
