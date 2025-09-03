@@ -7,6 +7,10 @@ const readline = require("readline");
 const https = require("https");
 const unzipper = require("unzipper");
 
+// Pour régler la vitesse : 100 = normal, 120 = 20% plus rapide, etc.
+const ACCEL_PERCENT = 110;
+const ACCEL_FACTOR = 100 / ACCEL_PERCENT;
+
 const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -193,19 +197,21 @@ async function downloadFFmpeg(destFolder) {
         console.log("✅ Réutilisation de video_temp.mp4");
     }
 
-    // Accélération de la vidéo de 1,5 %
-        const acceleratedFile = path.join(exeDir, "video_temp_accelerated.mp4");
-        try {
-            console.log("\n⚡ Accélération de la vidéo de 20 %...");
-            execSync(
-                `"${ffmpeg}" -y -i "${tempFile}" -filter:v "setpts=0.833*PTS" -filter:a "atempo=1.2" "${acceleratedFile}"`,
-                { stdio: "inherit" }
-            );
-            console.log("✅ Vidéo accélérée enregistrée sous video_temp_accelerated.mp4");
-        } catch {
-            console.error("⛔ Échec de l'accélération de la vidéo.");
-            process.exit(1);
-        }
+    // Accélération de la vidéo selon ACCEL_FACTOR
+    const acceleratedFile = path.join(exeDir, "video_temp_accelerated.mp4");
+    try {
+        console.log(`\n⚡ Accélération de la vidéo à ${ACCEL_PERCENT}% de la vitesse normale...`);
+        // Pour l'audio, atempo doit être entre 0.5 et 2.0, donc on ajuste si besoin
+        const atempo = Math.max(0.5, Math.min(2.0, ACCEL_PERCENT / 100));
+        execSync(
+            `"${ffmpeg}" -y -i "${tempFile}" -filter:v "setpts=${ACCEL_FACTOR}*PTS" -filter:a "atempo=${atempo}" "${acceleratedFile}"`,
+            { stdio: "inherit" }
+        );
+        console.log("✅ Vidéo accélérée enregistrée sous video_temp_accelerated.mp4");
+    } catch {
+        console.error("⛔ Échec de l'accélération de la vidéo.");
+        process.exit(1);
+    }
 
     // parse des plages
     let expandedRanges = [];
@@ -225,9 +231,8 @@ async function downloadFFmpeg(destFolder) {
                 process.exit(1);
             }
         }
-    // Pour que chaque segment fasse 1 min après accélération, on découpe par 60 / 0.833 ≈ 72.04 secondes
-    const accelFactor = 0.833;
-    const targetSegment = 60 / accelFactor; // ≈ 72.04
+    // Pour que chaque segment fasse 1 min après accélération, on découpe par 60 / ACCEL_FACTOR
+    const targetSegment = 60 / ACCEL_FACTOR;
         if (autoSplit) {
             expandedRanges = [];
             let cur = 0;
@@ -248,9 +253,8 @@ async function downloadFFmpeg(destFolder) {
                 const [s, e] = r.split("-");
                 return { start: toSeconds(s), end: toSeconds(e) };
             });
-    // Pour que chaque segment fasse 1 min après accélération, on découpe par 60 / 0.833 ≈ 72.04 secondes
-    const accelFactor = 0.833;
-    const targetSegment = 60 / accelFactor; // ≈ 72.04
+    // Pour que chaque segment fasse 1 min après accélération, on découpe par 60 / ACCEL_FACTOR
+    const targetSegment = 60 / ACCEL_FACTOR;
         expandedRanges = autoSplit
             ? ranges.flatMap(({ start, end }) => {
                 const segments = [];
