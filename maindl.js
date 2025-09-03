@@ -194,18 +194,18 @@ async function downloadFFmpeg(destFolder) {
     }
 
     // Accélération de la vidéo de 1,5 %
-    const acceleratedFile = path.join(exeDir, "video_temp_accelerated.mp4");
-    try {
-        console.log("\n⚡ Accélération de la vidéo de 1,5 %...");
-        execSync(
-            `"${ffmpeg}" -y -i "${tempFile}" -filter:v "setpts=0.985*PTS" -filter:a "atempo=1.015" "${acceleratedFile}"`,
-            { stdio: "inherit" }
-        );
-        console.log("✅ Vidéo accélérée enregistrée sous video_temp_accelerated.mp4");
-    } catch {
-        console.error("⛔ Échec de l'accélération de la vidéo.");
-        process.exit(1);
-    }
+        const acceleratedFile = path.join(exeDir, "video_temp_accelerated.mp4");
+        try {
+            console.log("\n⚡ Accélération de la vidéo de 20 %...");
+            execSync(
+                `"${ffmpeg}" -y -i "${tempFile}" -filter:v "setpts=0.833*PTS" -filter:a "atempo=1.2" "${acceleratedFile}"`,
+                { stdio: "inherit" }
+            );
+            console.log("✅ Vidéo accélérée enregistrée sous video_temp_accelerated.mp4");
+        } catch {
+            console.error("⛔ Échec de l'accélération de la vidéo.");
+            process.exit(1);
+        }
 
     // parse des plages
     let expandedRanges = [];
@@ -225,9 +225,9 @@ async function downloadFFmpeg(destFolder) {
                 process.exit(1);
             }
         }
-        // Pour que chaque segment fasse 1 min après accélération, on découpe par 60 / 0.985 ≈ 60.91 secondes
-        const accelFactor = 0.985;
-        const targetSegment = 60 / accelFactor; // ≈ 60.91
+    // Pour que chaque segment fasse 1 min après accélération, on découpe par 60 / 0.833 ≈ 72.04 secondes
+    const accelFactor = 0.833;
+    const targetSegment = 60 / accelFactor; // ≈ 72.04
         if (autoSplit) {
             expandedRanges = [];
             let cur = 0;
@@ -248,9 +248,9 @@ async function downloadFFmpeg(destFolder) {
                 const [s, e] = r.split("-");
                 return { start: toSeconds(s), end: toSeconds(e) };
             });
-        // Pour que chaque segment fasse 1 min après accélération, on découpe par 60 / 0.985 ≈ 60.91 secondes
-        const accelFactor = 0.985;
-        const targetSegment = 60 / accelFactor; // ≈ 60.91
+    // Pour que chaque segment fasse 1 min après accélération, on découpe par 60 / 0.833 ≈ 72.04 secondes
+    const accelFactor = 0.833;
+    const targetSegment = 60 / accelFactor; // ≈ 72.04
         expandedRanges = autoSplit
             ? ranges.flatMap(({ start, end }) => {
                 const segments = [];
