@@ -129,7 +129,7 @@ async function downloadFFmpeg(destFolder) {
     if (!videoExists) {
         console.log("\n⬇️ Téléchargement de la vidéo…");
         if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
-        let formatString = "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]";
+        let formatString = "609+234";
         let downloadSuccess = false;
         let tryCount = 0;
         let separateDownload = false;
