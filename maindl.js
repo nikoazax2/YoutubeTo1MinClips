@@ -7,9 +7,7 @@ const readline = require("readline");
 const https = require("https");
 const unzipper = require("unzipper");
 
-// Pour régler la vitesse : 100 = normal, 120 = 20% plus rapide, etc.
-const ACCEL_PERCENT = 110;
-const ACCEL_FACTOR = 100 / ACCEL_PERCENT;
+// Suppression de l'accélération : la vidéo sera traitée à vitesse normale
 
 const rl = readline.createInterface({
     input: process.stdin,
@@ -197,21 +195,7 @@ async function downloadFFmpeg(destFolder) {
         console.log("✅ Réutilisation de video_temp.mp4");
     }
 
-    // Accélération de la vidéo selon ACCEL_FACTOR
-    const acceleratedFile = path.join(exeDir, "video_temp_accelerated.mp4");
-    try {
-        console.log(`\n⚡ Accélération de la vidéo à ${ACCEL_PERCENT}% de la vitesse normale...`);
-        // Pour l'audio, atempo doit être entre 0.5 et 2.0, donc on ajuste si besoin
-        const atempo = Math.max(0.5, Math.min(2.0, ACCEL_PERCENT / 100));
-        execSync(
-            `"${ffmpeg}" -y -i "${tempFile}" -filter:v "setpts=${ACCEL_FACTOR}*PTS" -filter:a "atempo=${atempo}" "${acceleratedFile}"`,
-            { stdio: "inherit" }
-        );
-        console.log("✅ Vidéo accélérée enregistrée sous video_temp_accelerated.mp4");
-    } catch {
-        console.error("⛔ Échec de l'accélération de la vidéo.");
-        process.exit(1);
-    }
+    // La vidéo sera traitée à vitesse normale, pas d'accélération
 
     // parse des plages
     let expandedRanges = [];
@@ -231,8 +215,8 @@ async function downloadFFmpeg(destFolder) {
                 process.exit(1);
             }
         }
-    // Pour que chaque segment fasse 1 min après accélération, on découpe par 60 / ACCEL_FACTOR
-    const targetSegment = 60 / ACCEL_FACTOR;
+        // On découpe en segments de 60s
+        const targetSegment = 60;
         if (autoSplit) {
             expandedRanges = [];
             let cur = 0;
@@ -253,8 +237,8 @@ async function downloadFFmpeg(destFolder) {
                 const [s, e] = r.split("-");
                 return { start: toSeconds(s), end: toSeconds(e) };
             });
-    // Pour que chaque segment fasse 1 min après accélération, on découpe par 60 / ACCEL_FACTOR
-    const targetSegment = 60 / ACCEL_FACTOR;
+        // On découpe en segments de 60s
+        const targetSegment = 60;
         expandedRanges = autoSplit
             ? ranges.flatMap(({ start, end }) => {
                 const segments = [];
@@ -310,9 +294,9 @@ async function downloadFFmpeg(destFolder) {
         const duration = end - start;
         const outName = path.join(outputDir, `segment_${i + 1}_${start}s_${end}s_${useBlurFill ? "blur" : "crop"}.mp4`);
 
-        // Utilisation de la vidéo accélérée pour les découpes
+        // Utilisation de la vidéo originale pour les découpes
         const cmd =
-            `"${ffmpeg}" -y -ss ${start} -t ${duration} -i "${acceleratedFile}" ` +
+            `"${ffmpeg}" -y -ss ${start} -t ${duration} -i "${tempFile}" ` +
             `-vf ${cropFilter} -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k "${outName}"`;
 
         console.log(`\n🔄 Traitement plage #${i + 1} → ${outName}`);
