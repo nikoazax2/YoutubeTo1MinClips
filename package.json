@@ -1,7 +1,7 @@
 {
   "private": true,
   "name": "youtube-to-1min-clips",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Découpe des vidéo YouTube en clips",
   "scripts": {
     "build:win": "pkg maindl.js --targets node18-win-x64 --output maindl.exe"
