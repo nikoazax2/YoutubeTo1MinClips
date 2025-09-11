@@ -106,7 +106,7 @@ async function downloadFFmpeg(destFolder) {
         // On prendra toute la vidéo, on déterminera la durée plus tard
         formatChoice = await ask("Format téléphone recadré (1) ou paysage + bandes floutées (2) ? (1/2, défaut=1) : ");
         useBlurFill = formatChoice.trim() === "2";
-        autoSplitAns = await ask("Découper automatiquement la vidéo en segments de 60s ? (O/n) : ");
+        autoSplitAns = await ask("Découper automatiquement la vidéo en segments ? (O/n) : ");
         autoSplit = autoSplitAns.trim().toLowerCase() !== "n";
     } else {
         // On demande les plages
@@ -115,6 +115,20 @@ async function downloadFFmpeg(destFolder) {
         useBlurFill = formatChoice.trim() === "2";
         autoSplitAns = await ask("Découper automatiquement les plages en segments de 60s ? (O/n) : ");
         autoSplit = autoSplitAns.trim().toLowerCase() !== "n";
+    }
+
+    // Demande de la durée des segments si découpe automatique choisie
+    let segmentLength = 60; // durée par défaut en secondes
+    if (autoSplit) {
+        const segLenAns = await ask("Durée des segments en secondes ? (défaut=60) : ");
+        if (segLenAns && segLenAns.trim() !== "") {
+            const maybeNum = parseInt(segLenAns.trim(), 10);
+            if (!isNaN(maybeNum) && maybeNum > 0) {
+                segmentLength = maybeNum;
+            } else {
+                console.log("Valeur invalide. Utilisation de 60s par défaut.");
+            }
+        }
     }
 
     if (!fs.existsSync(ytDlp)) {
@@ -216,7 +230,7 @@ async function downloadFFmpeg(destFolder) {
             }
         }
         // On découpe en segments de 60s
-        const targetSegment = 60;
+    const targetSegment = segmentLength;
         if (autoSplit) {
             expandedRanges = [];
             let cur = 0;
@@ -238,7 +252,7 @@ async function downloadFFmpeg(destFolder) {
                 return { start: toSeconds(s), end: toSeconds(e) };
             });
         // On découpe en segments de 60s
-        const targetSegment = 60;
+    const targetSegment = segmentLength;
         expandedRanges = autoSplit
             ? ranges.flatMap(({ start, end }) => {
                 const segments = [];
