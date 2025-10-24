@@ -31,6 +31,174 @@ function toSeconds(time) {
     }
 }
 
+/**
+ * Heuristique locale pour extraire des "meilleurs moments" d'une vidéo qui ne t'appartient pas.
+ * Hypothèses:
+ *  - Le fichier vidéo déjà téléchargé est `video_temp.mp4` dans le dossier courant (exeDir).
+ *  - On utilise uniquement des signaux accessibles sans analytics: timestamps dans description/commentaires + coupures de scène.
+ *  - On propose N fenêtres de longueur fixe autour des pics de score combiné.
+ *
+ * Score par seconde = 3 * (timestamp proche) + 1 * (densité de coupes de scène).
+ * On glisse une fenêtre (spanSeconds) et on prend les meilleures non-chevauchantes.
+ *
+ * @param {string} videoUrl URL YouTube
+ * @param {object} [opts]
+ * @param {number} [opts.maxHighlights=5] Nombre de segments à retourner
+ * @param {number} [opts.spanSeconds=30] Durée d'un segment en secondes
+ * @param {number} [opts.sceneThreshold=0.4] Seuil de détection de scène ffmpeg
+ * @param {boolean} [opts.includeComments=true] Activer parse des commentaires (peut être lent)
+ * @returns {Array<{start:number,end:number,score:number,reason:string}>}
+ */
+function getBestMoments(videoUrl, opts = {}) {
+    const {
+        maxHighlights = 5,
+        spanSeconds = 30,
+        sceneThreshold = 0.4,
+        includeComments = true,
+    } = opts;
+
+    const exeDir = process.pkg ? path.dirname(process.execPath) : process.cwd();
+    const ytDlp = path.join(exeDir, "yt-dlp.exe");
+    const ffmpeg = path.join(exeDir, "ffmpeg.exe");
+    const tempFile = path.join(exeDir, "video_temp.mp4");
+
+    if (!fs.existsSync(tempFile)) {
+        console.warn("getBestMoments: fichier vidéo introuvable: " + tempFile);
+        return [];
+    }
+    if (!fs.existsSync(ytDlp)) {
+        console.warn("getBestMoments: yt-dlp.exe introuvable.");
+        return [];
+    }
+    if (!fs.existsSync(ffmpeg)) {
+        console.warn("getBestMoments: ffmpeg.exe introuvable.");
+        return [];
+    }
+
+    // 1. Durée de la vidéo
+    let duration = 0;
+    try {
+        // On force l'écriture dans stderr; execSync renvoie l'erreur qu'on capture pour lire la durée
+        execSync(`"${ffmpeg}" -i "${tempFile}" -hide_banner`, { stdio: "pipe" });
+    } catch (err) {
+        const output = (err.stderr ? err.stderr.toString() : "") + (err.stdout ? err.stdout.toString() : "");
+        const match = output.match(/Duration: (\d+):(\d+):(\d+\.\d+)/);
+        if (match) {
+            const [, h, m, s] = match;
+            duration = (+h) * 3600 + (+m) * 60 + parseFloat(s);
+        }
+    }
+    if (!duration || isNaN(duration)) {
+        console.warn("getBestMoments: durée non déterminée.");
+        return [];
+    }
+
+    // 2. Récupération description (+ éventuels commentaires)
+    let rawText = "";
+    try {
+        rawText += execSync(`"${ytDlp}" --get-description "${videoUrl}"`, { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
+    } catch { /* ignore */ }
+    if (includeComments) {
+        try {
+            // Peut être lent / gros; on peut limiter plus tard
+            rawText += "\n" + execSync(`"${ytDlp}" --get-comments "${videoUrl}"`, { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
+        } catch { /* ignore */ }
+    }
+
+    // 3. Extraction timestamps (MM:SS ou HH:MM:SS) -> secondes
+    const timestampRegex = /\b(?:(\d{1,2}):)?(\d{1,2}):(\d{2})\b/g; // capture HH:MM:SS ou MM:SS
+    const timestampSeconds = [];
+    let m;
+    while ((m = timestampRegex.exec(rawText)) !== null) {
+        const [, hOpt, mPart, sPart] = m;
+        const hVal = hOpt ? parseInt(hOpt, 10) : 0;
+        const minVal = parseInt(mPart, 10);
+        const secVal = parseInt(sPart, 10);
+        const total = hVal * 3600 + minVal * 60 + secVal;
+        if (!isNaN(total) && total <= duration) timestampSeconds.push(total);
+    }
+
+    // Fréquence par seconde (fenêtre ±5s)
+    const timestampWeightRadius = 5;
+    const tsPresence = new Array(Math.ceil(duration) + 1).fill(0);
+    timestampSeconds.forEach(sec => {
+        const start = Math.max(0, sec - timestampWeightRadius);
+        const end = Math.min(tsPresence.length - 1, sec + timestampWeightRadius);
+        for (let i = start; i <= end; i++) tsPresence[i] += 1;
+    });
+
+    // 4. Détection de scènes -> liste des times (secs) où changement significatif
+    let sceneCuts = [];
+    try {
+        const cutOutput = execSync(`"${ffmpeg}" -i "${tempFile}" -vf "select='gt(scene,${sceneThreshold})',showinfo" -f null - 2>&1`, { encoding: "utf-8" });
+        const ptsRegex = /pts_time:([0-9]+\.[0-9]+)/g;
+        let mm;
+        while ((mm = ptsRegex.exec(cutOutput)) !== null) {
+            const t = parseFloat(mm[1]);
+            if (!isNaN(t) && t <= duration) sceneCuts.push(t);
+        }
+    } catch {
+        // fallback silencieux
+    }
+    sceneCuts.sort((a, b) => a - b);
+
+    // Densité de coupes par seconde (±2s)
+    const sceneRadius = 2;
+    const cutDensity = new Array(Math.ceil(duration) + 1).fill(0);
+    for (const cut of sceneCuts) {
+        const base = Math.round(cut);
+        const start = Math.max(0, base - sceneRadius);
+        const end = Math.min(cutDensity.length - 1, base + sceneRadius);
+        for (let i = start; i <= end; i++) cutDensity[i] += 1;
+    }
+
+    // 5. Score combiné par seconde
+    const scores = new Array(Math.ceil(duration) + 1).fill(0);
+    for (let i = 0; i < scores.length; i++) {
+        scores[i] = tsPresence[i] * 3 + cutDensity[i] * 1; // pondérations simples
+    }
+
+    // 6. Sliding window pour repérer meilleurs segments
+    const windowScores = [];
+    const span = spanSeconds;
+    const maxStart = Math.max(0, Math.floor(duration - span));
+    // Pré-calcul somme cumulative pour vitesse
+    const prefix = [0];
+    for (let i = 0; i < scores.length; i++) prefix.push(prefix[prefix.length - 1] + scores[i]);
+    function sumRange(a, b) { // inclusif a..b
+        return prefix[b + 1] - prefix[a];
+    }
+    for (let start = 0; start <= maxStart; start++) {
+        const end = Math.min(scores.length - 1, start + span - 1);
+        const wScore = sumRange(start, end) / (end - start + 1); // moyenne
+        windowScores.push({ start, end: start + span, score: wScore });
+    }
+    // Trie par score décroissant
+    windowScores.sort((a, b) => b.score - a.score);
+
+    // 7. Sélection non-chevauchante des top N
+    const chosen = [];
+    for (const w of windowScores) {
+        if (chosen.length >= maxHighlights) break;
+        if (chosen.some(c => !(w.end <= c.start || w.start >= c.end))) continue; // overlap
+        const reasonParts = [];
+        // Indices de ts dans la fenêtre
+        const tsCount = timestampSeconds.filter(ts => ts >= w.start && ts <= w.end).length;
+        if (tsCount) reasonParts.push(`${tsCount} timestamps`);
+        const cutsCount = sceneCuts.filter(sc => sc >= w.start && sc <= w.end).length;
+        if (cutsCount) reasonParts.push(`${cutsCount} coupes`);
+        if (reasonParts.length === 0) reasonParts.push("activité relative");
+        chosen.push({ start: w.start, end: Math.min(duration, w.end), score: w.score, reason: reasonParts.join(", ") });
+    }
+
+    // Si rien sélectionné, fallback: début de la vidéo
+    if (chosen.length === 0) {
+        chosen.push({ start: 0, end: Math.min(duration, span), score: 0, reason: "fallback" });
+    }
+
+    return chosen;
+}
+
 async function downloadFFmpeg(destFolder) {
     console.log("\nffmpeg.exe introuvable. Téléchargement en cours…");
     const zipPath = path.join(destFolder, "ffmpeg.zip");
@@ -95,26 +263,42 @@ async function downloadFFmpeg(destFolder) {
             videoExists = false; // Indique qu'il n'y a pas de vidéo existante à réutiliser
             youtubeURL = await ask("Lien YouTube : ");
         }
-    } 
+    }
 
-    // Demande si on veut toute la vidéo
-    const allVideoAns = await ask("Prendre toute la vidéo ? (o/n) : ");
+    // Mode highlights ?
+    const highlightAns = await ask("Extraire automatiquement les meilleurs moments (segments de 60s) ? (o/n) : ");
+    const highlightMode = highlightAns.trim().toLowerCase() === "o";
+    let highlightCount = 5;
+    let includeComments = true;
     let rangesInput = "";
-    let useAllVideo = allVideoAns.trim().toLowerCase() === "o";
-    let formatChoice, useBlurFill, autoSplitAns, autoSplit;
-    if (useAllVideo) {
-        // On prendra toute la vidéo, on déterminera la durée plus tard
-        formatChoice = await ask("Format téléphone recadré (1) ou paysage + bandes floutées (2) ? (1/2, défaut=1) : ");
-        useBlurFill = formatChoice.trim() === "2";
-        autoSplitAns = await ask("Découper automatiquement la vidéo en segments ? (O/n) : ");
-        autoSplit = autoSplitAns.trim().toLowerCase() !== "n";
+    let useAllVideo = false;
+    let formatChoice, useBlurFill, autoSplitAns, autoSplit = false;
+
+    if (highlightMode) {
+        const hc = await ask("Nombre de segments de highlights souhaités ? (défaut=5) : ");
+        if (hc && !isNaN(parseInt(hc.trim(), 10)) && parseInt(hc.trim(), 10) > 0) {
+            highlightCount = parseInt(hc.trim(), 10);
+        }
+        const commentsAns = await ask("Inclure analyse des commentaires (plus lent) ? (O/n) : ");
+        includeComments = commentsAns.trim().toLowerCase() !== "n";
+        // formatChoice = await ask("Format téléphone recadré (1) ou paysage + bandes floutées (2) ? (1/2, défaut=1) : ");
+        useBlurFill = true
     } else {
-        // On demande les plages
-        rangesInput = await ask("Saisis les plages (hh:mm:ss-hh:mm:ss, séparées par des virgules) :\n");
-        formatChoice = await ask("Format téléphone recadré (1) ou paysage + bandes floutées (2) ? (1/2, défaut=1) : ");
-        useBlurFill = formatChoice.trim() === "2";
-        autoSplitAns = await ask("Découper automatiquement les plages en segments de 60s ? (O/n) : ");
-        autoSplit = autoSplitAns.trim().toLowerCase() !== "n";
+        // Demande si on veut toute la vidéo (mode classique)
+        const allVideoAns = await ask("Prendre toute la vidéo ? (o/n) : ");
+        useAllVideo = allVideoAns.trim().toLowerCase() === "o";
+        if (useAllVideo) {
+            // formatChoice = await ask("Format téléphone recadré (1) ou paysage + bandes floutées (2) ? (1/2, défaut=1) : ");
+            useBlurFill = true
+            autoSplitAns = await ask("Découper automatiquement la vidéo en segments ? (O/n) : ");
+            autoSplit = autoSplitAns.trim().toLowerCase() !== "n";
+        } else {
+            rangesInput = await ask("Saisis les plages (hh:mm:ss-hh:mm:ss, séparées par des virgules) :\n");
+            // formatChoice = await ask("Format téléphone recadré (1) ou paysage + bandes floutées (2) ? (1/2, défaut=1) : ");
+            useBlurFill = true
+            autoSplitAns = await ask("Découper automatiquement les plages en segments de 60s ? (O/n) : ");
+            autoSplit = autoSplitAns.trim().toLowerCase() !== "n";
+        }
     }
 
     // Demande de la durée des segments si découpe automatique choisie
@@ -211,9 +395,22 @@ async function downloadFFmpeg(destFolder) {
 
     // La vidéo sera traitée à vitesse normale, pas d'accélération
 
-    // parse des plages
+    // Construction des plages
     let expandedRanges = [];
-    if (useAllVideo) {
+    if (highlightMode) {
+        console.log("\n🔍 Calcul des meilleurs moments…");
+        const highlights = getBestMoments(youtubeURL, { maxHighlights: highlightCount, spanSeconds: 60, includeComments });
+        if (!highlights.length) {
+            console.log("⚠️ Aucun highlight détecté, fallback sur début de la vidéo.");
+        } else {
+            console.log("✅ Highlights trouvés:");
+            highlights.forEach((h, idx) => {
+                console.log(`#${idx + 1} ${h.start}s → ${h.end}s (${Math.round(h.end - h.start)}s) score=${h.score.toFixed(2)} raisons: ${h.reason}`);
+            });
+        }
+        expandedRanges = highlights.map(h => ({ start: h.start, end: h.end }));
+        if (!expandedRanges.length) expandedRanges = [{ start: 0, end: 60 }];
+    } else if (useAllVideo) {
         // Détermine la durée de la vidéo
         let videoDuration = 0;
         try {
@@ -230,7 +427,7 @@ async function downloadFFmpeg(destFolder) {
             }
         }
         // On découpe en segments de 60s
-    const targetSegment = segmentLength;
+        const targetSegment = segmentLength;
         if (autoSplit) {
             expandedRanges = [];
             let cur = 0;
@@ -252,7 +449,7 @@ async function downloadFFmpeg(destFolder) {
                 return { start: toSeconds(s), end: toSeconds(e) };
             });
         // On découpe en segments de 60s
-    const targetSegment = segmentLength;
+        const targetSegment = segmentLength;
         expandedRanges = autoSplit
             ? ranges.flatMap(({ start, end }) => {
                 const segments = [];
@@ -269,6 +466,9 @@ async function downloadFFmpeg(destFolder) {
     }
 
     console.log(`\n🧩 Segments à traiter: ${expandedRanges.length}`);
+    if (highlightMode) {
+        console.log("(Mode highlights automatique)");
+    }
 
     // filtre FFmpeg corrigé
     const cropFilter = useBlurFill
