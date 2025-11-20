@@ -1,90 +1,87 @@
 # YoutubeTo1MinClips
 
-**YoutubeTo1MinClips** est un outil qui télécharge une vidéo YouTube, la découpe en clips de 1 minute maximum, et recadre les vidéos au format portrait (1080×1920) **ou ajoute des bandes floutées en paysage** avec audio.  
-Tout se fait en local, sans dépendances globales, grâce à `yt-dlp` et `ffmpeg` inclus dans le projet.
+**YoutubeTo1MinClips** is a tool that downloads a YouTube video, splits it into clips of up to 1 minute, and crops the videos to portrait format (1080×1920) **or adds blurred sidebars in landscape** with audio.
+Everything is done locally, with no global dependencies, thanks to `yt-dlp` and `ffmpeg` included in the project.
 
-➡️ Le but est de faciliter la création de clips courts pour TikTok, Instagram Reels, ou YouTube Shorts à partir de vidéos YouTube.
+➡️ The goal is to make it easy to create short clips for TikTok, Instagram Reels, or YouTube Shorts from YouTube videos.
 
 ## Installation
 
-1. Téléchargez le ZIP du projet ici : [YoutubeTo1MinClips.zip](https://github.com/nikoazax2/YoutubeTo1MinClips/archive/refs/heads/main.zip)
-2. Extrayez l'archive dans un dossier de votre choix
-3. Lancez l'exécutable `maindl.exe`
+1. Download the project ZIP here: [YoutubeTo1MinClips.zip](https://github.com/nikoazax2/YoutubeTo1MinClips/archive/refs/heads/main.zip)
+2. Extract the archive to a folder of your choice
+3. Run the `maindl.exe` executable
 
-C'est tout ! Le logiciel téléchargera automatiquement les binaires nécessaires (`yt-dlp.exe` et `ffmpeg.exe`) s'ils ne sont pas déjà présents dans le dossier.
+That's it! The software will automatically download the required binaries (`yt-dlp.exe` and `ffmpeg.exe`) if they are not already present in the folder.
 
-## Fonctionnalités
+## Features
 
-- Télécharge une vidéo YouTube au format `.mp4`
-- Découpe la vidéo entre deux timecodes spécifiés (début et fin)
-- Génère plusieurs clips de 1 minute maximum chacun
-- **Deux modes de recadrage vidéo :**
+- Downloads a YouTube video in `.mp4` format
+- Cuts the video between two specified timecodes (start and end)
+- Generates several clips of up to 1 minute each
+- **Two video cropping modes:**
   - **Portrait 9:16 (1080×1920)**
-  - **Paysage avec bandes floutées (blur fill)** pour conserver l'intégralité de l'image sans crop
-- Conserve l’audio
-- Fonctionne avec un script Node.js ou un `.exe` Windows sans Node installé
+  - **Landscape with blurred sidebars (blur fill)** to keep the full image without cropping
+- Keeps the audio
+- Works with a Node.js script or a Windows `.exe` without Node installed
 
-## Structure du projet
+## Project Structure
 
 ```
-
 YoutubeTo1MinClips/
-├── maindl.js # Script Node.js interactif
-├── yt-dlp.exe # Binaire yt-dlp (Windows)
-├── ffmpeg.exe # Binaire ffmpeg (Windows)
-├── maindl.exe # (optionnel) Exécutable compilé avec pkg
-
+├── maindl.js # Interactive Node.js script
+├── yt-dlp.exe # yt-dlp binary (Windows)
+├── ffmpeg.exe # ffmpeg binary (Windows)
+├── maindl.exe # (optional) Executable compiled with pkg
 ```
 
-## Pré-requis
+## Requirements
 
-- Si vous utilisez le script Node.js :
-  - [Node.js](https://nodejs.org/) installé
-- Si vous utilisez l’exécutable `.exe` :
-  - Aucun pré-requis
-  - Les binaires `ffmpeg.exe` et `yt-dlp.exe` doivent être dans le même dossier que le script ou l’exécutable
+- If you use the Node.js script:
+  - [Node.js](https://nodejs.org/) installed
+- If you use the `.exe` executable:
+  - No requirements
+  - The `ffmpeg.exe` and `yt-dlp.exe` binaries must be in the same folder as the script or executable
 
-## Mise à jour
+## Update
 
-Pour mettre à jour le projet, il suffit d'ouvrir l'exécutable `update.exe` présent dans le dossier. Celui-ci récupérera automatiquement la dernière version disponible.
+To update the project, simply open the `update.exe` executable in the folder. It will automatically fetch the latest available version.
 
-## Utilisation
+## Usage
 
-### Avec Node.js
+### With Node.js
 
 ```bash
 node maindl.js
 ```
 
-### Avec l’exécutable
+### With the executable
 
 ```bash
 ./maindl.exe
 ```
 
+The program will ask you for:
 
-Le programme vous demandera :
+- the YouTube link
+- the start timecode (example: `00:00`)
+- the end timecode (example: `05:00`)
+- the output format:
+  - **1**: phone cropped (portrait 9:16)
+  - **2**: landscape with blurred sidebars (blur fill)
 
-- le lien YouTube
-- le timecode de début (exemple : `00:00`)
-- le timecode de fin (exemple : `05:00`)
-- le format de sortie :
-  - **1** : téléphone recadré (portrait 9:16)
-  - **2** : paysage avec bandes floutées (blur fill)
-
-Puis il produira plusieurs fichiers dans le même dossier, par exemple :
+Then it will produce several files in the same folder, for example:
 
 ```
 video_temp_part1_portrait.mp4
 video_temp_part2_portrait.mp4
 video_temp_part1_blurfill.mp4
 video_temp_part2_blurfill.mp4
-…
+...
 ```
 
 ## Notes
 
-- Les vidéos sont découpées proprement avec FFmpeg pour une qualité optimale.
-- Le mode "bandes floutées" (blur fill) permet de générer des vidéos paysage adaptées aux réseaux sociaux tout en gardant l'intégralité de l'image.
-- Les sous-titres automatiques TikTok ne sont pas générés par cet outil.
-- Ce projet est conçu pour Windows. Une adaptation pour Linux/Mac est possible en utilisant les binaires appropriés.
+- Videos are cleanly cut with FFmpeg for optimal quality.
+- The "blur fill" mode allows you to generate landscape videos suitable for social networks while keeping the full image.
+- Automatic TikTok subtitles are not generated by this tool.
+- This project is designed for Windows. It can be adapted for Linux/Mac by using the appropriate binaries.
