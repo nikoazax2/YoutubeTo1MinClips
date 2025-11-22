@@ -53,7 +53,7 @@ function toSeconds(time) {
 function getBestMoments(videoUrl, opts = {}) {
     const {
         maxHighlights = 5,
-        spanSeconds = 30,
+        spanSeconds = 61, // par défaut 61 secondes
         sceneThreshold = 0.4,
         includeComments = true,
     } = opts;
@@ -303,15 +303,15 @@ async function downloadFFmpeg(destFolder) {
     }
 
     // Ask for segment length if auto split is chosen
-    let segmentLength = 60; // default duration in seconds
+    let segmentLength = 61; // default duration in seconds (était 60)
     if (autoSplit) {
-        const segLenAns = await ask("Segment duration in seconds? (default=60): ");
+        const segLenAns = await ask("Segment duration in seconds? (default=61): ");
         if (segLenAns && segLenAns.trim() !== "") {
             const maybeNum = parseInt(segLenAns.trim(), 10);
             if (!isNaN(maybeNum) && maybeNum > 0) {
                 segmentLength = maybeNum;
             } else {
-                console.log("Invalid value. Using 60s by default.");
+                console.log("Invalid value. Using 61s by default.");
             }
         }
     }
@@ -400,7 +400,7 @@ async function downloadFFmpeg(destFolder) {
     let expandedRanges = [];
     if (highlightMode) {
         console.log("\n🔍 Calculating best moments…");
-        const highlights = getBestMoments(youtubeURL, { maxHighlights: highlightCount, spanSeconds: 60, includeComments });
+        const highlights = getBestMoments(youtubeURL, { maxHighlights: highlightCount, spanSeconds: segmentLength, includeComments });
         if (!highlights.length) {
             console.log("⚠️ No highlight detected, fallback to start of video.");
         } else {
@@ -410,7 +410,7 @@ async function downloadFFmpeg(destFolder) {
             });
         }
         expandedRanges = highlights.map(h => ({ start: h.start, end: h.end }));
-        if (!expandedRanges.length) expandedRanges = [{ start: 0, end: 60 }];
+        if (!expandedRanges.length) expandedRanges = [{ start: 0, end: segmentLength }];
     } else if (useAllVideo) {
         // Determine video duration
         let videoDuration = 0;
