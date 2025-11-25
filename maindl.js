@@ -360,7 +360,7 @@ async function downloadFFmpeg(destFolder) {
     }
 
     // Highlights mode?
-    const highlightAns = await ask("Automatically extract best moments (60s segments)? (y/n): ");
+    const highlightAns = await ask("Automatically extract best moments (61s segments)? (y/n): ");
     const highlightMode = highlightAns.trim().toLowerCase() === "y";
     let highlightCount = 5;
     let includeComments = true;
@@ -390,7 +390,7 @@ async function downloadFFmpeg(destFolder) {
             rangesInput = await ask("Enter ranges (hh:mm:ss-hh:mm:ss, separated by commas):\n");
             // formatChoice = await ask("Phone format (1) or landscape + blurred bars (2)? (1/2, default=1): ");
             useBlurFill = true
-            autoSplitAns = await ask("Automatically split ranges into 60s segments? (Y/n): ");
+            autoSplitAns = await ask("Automatically split ranges into 61s segments? (Y/n): ");
             autoSplit = autoSplitAns.trim().toLowerCase() !== "n";
         }
     }
@@ -520,7 +520,7 @@ async function downloadFFmpeg(destFolder) {
                 process.exit(1);
             }
         }
-        // Split into 60s segments
+        // Split into 61s segments
         const targetSegment = segmentLength;
         if (autoSplit) {
             expandedRanges = [];
@@ -542,7 +542,7 @@ async function downloadFFmpeg(destFolder) {
                 const [s, e] = r.split("-");
                 return { start: toSeconds(s), end: toSeconds(e) };
             });
-        // Split into 60s segments
+        // Split into 61s segments
         const targetSegment = segmentLength;
         expandedRanges = autoSplit
             ? ranges.flatMap(({ start, end }) => {
