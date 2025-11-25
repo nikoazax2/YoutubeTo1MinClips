@@ -32,6 +32,99 @@ function toSeconds(time) {
 }
 
 /**
+ * Constantes d'effets subtils pour rendre chaque segment unique.
+ * Ces valeurs sont fixes et suffisamment légères pour ne pas être perceptibles.
+ */
+const EFFECTS = {
+    // Colorimétrie subtile
+    saturation: 1.02,      // +2% saturation
+    contrast: 1.01,        // +1% contraste
+    gamma: 1.01,           // +1% gamma
+    brightness: 0.01,      // +1% luminosité
+
+    // Micro-rotation (en degrés, converti en radians pour FFmpeg)
+    rotationDeg: 0.2,      // 0.2 degrés
+
+    // Zoom léger (1.02 = 2% de zoom)
+    zoom: 1.02,
+
+    // Décalage horizontal/vertical pour le pan (en pixels)
+    panX: 5,
+    panY: 3,
+
+    // Grain subtil (intensité du bruit, 0-100)
+    grain: 3,
+
+    // Flou subtil (valeur de unsharp: luma_msize_x:luma_msize_y:luma_amount)
+    blur: 0.3,             // légère accentuation/flou
+
+    // Audio : pitch shift (1.01 = +1%, sans changer la durée via rubberband ou atempo compensation)
+    pitchShift: 1.01,
+
+    // Audio : EQ léger (en dB)
+    bassGain: 1.5,         // +1.5 dB sur les basses
+    trebleGain: -0.5,      // -0.5 dB sur les aigus
+};
+
+/**
+ * Construit la chaîne de filtres vidéo pour les effets de transformation.
+ * Inclut: colorimétrie, rotation, zoom avec pan, et grain.
+ * @param {boolean} useBlurFill - Si true, utilise le format blur fill, sinon crop simple
+ * @returns {string} - La chaîne de filtres vidéo pour FFmpeg
+ */
+function buildVideoFilter(useBlurFill) {
+    const rotationRad = (EFFECTS.rotationDeg * Math.PI / 180).toFixed(6);
+
+    // Filtre de colorimétrie
+    const colorFilter = `eq=saturation=${EFFECTS.saturation}:contrast=${EFFECTS.contrast}:gamma=${EFFECTS.gamma}:brightness=${EFFECTS.brightness}`;
+
+    // Filtre de rotation avec zoom intégré (rotate gère le zoom via ow/oh)
+    // On scale d'abord pour le zoom, puis rotate, puis crop pour recentrer
+    const zoomScale = `scale=iw*${EFFECTS.zoom}:ih*${EFFECTS.zoom}`;
+    const rotateFilter = `rotate=${rotationRad}:c=black@0:ow=rotw(${rotationRad}):oh=roth(${rotationRad})`;
+
+    // Filtre de grain (noise)
+    const grainFilter = `noise=alls=${EFFECTS.grain}:allf=t`;
+
+    // Filtre de flou subtil (unsharp pour légère accentuation ou flou)
+    const blurFilter = `unsharp=5:5:${EFFECTS.blur}:5:5:0`;
+
+    if (useBlurFill) {
+        // Format blur fill: fond flou + vidéo centrée
+        // On applique les effets sur la vidéo principale avant l'overlay
+        return `"split=2[main][bg];` +
+            `[main]${zoomScale},${rotateFilter},crop=iw/${EFFECTS.zoom}:ih/${EFFECTS.zoom}:(iw-iw/${EFFECTS.zoom})/2+${EFFECTS.panX}:(ih-ih/${EFFECTS.zoom})/2+${EFFECTS.panY},${colorFilter},${grainFilter},${blurFilter},scale=1080:-1[fg];` +
+            `[bg]scale=1080:1920:force_original_aspect_ratio=increase,boxblur=20:1,crop=1080:1920[bl];` +
+            `[bl][fg]overlay=(W-w)/2:(H-h)/2"`;
+    } else {
+        // Format crop simple: on applique tous les effets
+        return `"${zoomScale},${rotateFilter},crop=iw/${EFFECTS.zoom}:ih/${EFFECTS.zoom}:(iw-iw/${EFFECTS.zoom})/2+${EFFECTS.panX}:(ih-ih/${EFFECTS.zoom})/2+${EFFECTS.panY},` +
+            `${colorFilter},${grainFilter},${blurFilter},` +
+            `crop='min(iw,ih*9/16)':'min(ih,iw*16/9)':(iw-ow)/2:(ih-oh)/2,scale=1080:1920"`;
+    }
+}
+
+/**
+ * Construit la chaîne de filtres audio pour les effets de transformation.
+ * Inclut: EQ (basses/aigus) et pitch shift sans changement de durée.
+ * @returns {string} - La chaîne de filtres audio pour FFmpeg
+ */
+function buildAudioFilter() {
+    // EQ: bass et treble filters
+    const bassFilter = `bass=g=${EFFECTS.bassGain}:f=100`;
+    const trebleFilter = `treble=g=${EFFECTS.trebleGain}:f=3000`;
+
+    // Pitch shift sans changer la durée:
+    // On utilise asetrate pour changer le pitch, aresample pour revenir au sample rate original,
+    // puis atempo pour compenser le changement de vitesse
+    // Note: YouTube utilise généralement 48000 Hz
+    const sampleRate = 48000;
+    const atempoCompensation = (1 / EFFECTS.pitchShift).toFixed(6);
+    const pitchFilter = `asetrate=${sampleRate}*${EFFECTS.pitchShift},aresample=${sampleRate},atempo=${atempoCompensation}`;
+
+    return `"${bassFilter},${trebleFilter},${pitchFilter}"`;
+}
+
 /**
  * Local heuristic to extract "best moments" from a video you don't own.
  * Assumptions:
@@ -471,13 +564,9 @@ async function downloadFFmpeg(destFolder) {
         console.log("(Automatic highlights mode)");
     }
 
-    // Corrected FFmpeg filter
-    const cropFilter = useBlurFill
-        ? `"split=2[main][bg];` +
-        `[main]scale=1080:-1[fg];` +
-        `[bg]scale=1080:1920:force_original_aspect_ratio=increase,boxblur=20:1,crop=1080:1920[bl];` +
-        `[bl][fg]overlay=(W-w)/2:(H-h)/2"`
-        : `"crop='min(iw,ih*9/16)':'min(ih,iw*16/9)':(iw-ow)/2:(ih-oh)/2,scale=1080:1920"`;
+    // Filtres vidéo et audio avec effets de transformation
+    const videoFilter = buildVideoFilter(useBlurFill);
+    const audioFilter = buildAudioFilter();
 
     // Add logic to create a specific subfolder
     const videoName = youtubeURL ? youtubeURL.split('v=')[1] || 'video' : 'video';
@@ -509,10 +598,10 @@ async function downloadFFmpeg(destFolder) {
         const duration = end - start;
         const outName = path.join(outputDir, `segment_${i + 1}_${start}s_${end}s_${useBlurFill ? "blur" : "crop"}.mp4`);
 
-        // Use the original video for cuts
+        // Use the original video for cuts with video and audio effects
         const cmd =
             `"${ffmpeg}" -y -ss ${start} -t ${duration} -i "${tempFile}" ` +
-            `-vf ${cropFilter} -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k "${outName}"`;
+            `-vf ${videoFilter} -af ${audioFilter} -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k "${outName}"`;
 
         console.log(`\n🔄 Processing range #${i + 1} → ${outName}`);
         try {
