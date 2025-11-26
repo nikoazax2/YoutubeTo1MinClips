@@ -64,15 +64,45 @@ const EFFECTS = {
     // Audio : EQ léger (en dB)
     bassGain: 1.5,         // +1.5 dB sur les basses
     trebleGain: -0.5,      // -0.5 dB sur les aigus
+
+    // Miroir horizontal (flip)
+    mirror: true,         // true = vidéo miroir horizontalement
+
+    // Logo/Watermark
+    logo: {
+        enabled: true,              // true = afficher le logo
+        file: 'logo.jpg',           // nom du fichier logo
+        position: 'bd',             // hg=haut-gauche, hd=haut-droite, bg=bas-gauche, bd=bas-droite
+        scale: 0.12,                // taille du logo (15% de la largeur vidéo)
+        opacity: 1,               // opacité (0-1)
+        margin: 10,                 // marge en pixels depuis le bord
+    },
 };
 
 /**
+ * Retourne la position du logo pour FFmpeg overlay
+ * @param {string} position - hg, hd, bg, bd
+ * @param {number} margin - marge en pixels
+ * @returns {string} - expression overlay pour FFmpeg
+ */
+function getLogoPosition(position, margin) {
+    const positions = {
+        'hg': `${margin}:${margin}`,                      // haut-gauche
+        'hd': `W-w-${margin}:${margin}`,                  // haut-droite
+        'bg': `${margin}:H-h-${margin}`,                  // bas-gauche
+        'bd': `W-w-${margin}:H-h-${margin}`,              // bas-droite
+    };
+    return positions[position] || positions['bd'];
+}
+
+/**
  * Construit la chaîne de filtres vidéo pour les effets de transformation.
- * Inclut: colorimétrie, rotation, zoom avec pan, et grain.
+ * Inclut: colorimétrie, rotation, zoom avec pan, grain, miroir et logo.
  * @param {boolean} useBlurFill - Si true, utilise le format blur fill, sinon crop simple
+ * @param {boolean} hasLogo - Si true, le logo sera ajouté (input [1:v])
  * @returns {string} - La chaîne de filtres vidéo pour FFmpeg
  */
-function buildVideoFilter(useBlurFill) {
+function buildVideoFilter(useBlurFill, hasLogo = false) {
     const rotationRad = (EFFECTS.rotationDeg * Math.PI / 180).toFixed(6);
 
     // Filtre de colorimétrie
@@ -89,18 +119,43 @@ function buildVideoFilter(useBlurFill) {
     // Filtre de flou subtil (unsharp pour légère accentuation ou flou)
     const blurFilter = `unsharp=5:5:${EFFECTS.blur}:5:5:0`;
 
+    // Filtre miroir horizontal
+    const mirrorFilter = EFFECTS.mirror ? ',hflip' : '';
+
+    // Logo overlay (si activé)
+    const logoPos = getLogoPosition(EFFECTS.logo.position, EFFECTS.logo.margin);
+    const logoScale = `scale=1080*${EFFECTS.logo.scale}:-1`;
+    const logoOpacity = EFFECTS.logo.opacity < 1 ? `,format=rgba,colorchannelmixer=aa=${EFFECTS.logo.opacity}` : '';
+
     if (useBlurFill) {
         // Format blur fill: fond flou + vidéo centrée
-        // On applique les effets sur la vidéo principale avant l'overlay
-        return `"split=2[main][bg];` +
-            `[main]${zoomScale},${rotateFilter},crop=iw/${EFFECTS.zoom}:ih/${EFFECTS.zoom}:(iw-iw/${EFFECTS.zoom})/2+${EFFECTS.panX}:(ih-ih/${EFFECTS.zoom})/2+${EFFECTS.panY},${colorFilter},${grainFilter},${blurFilter},scale=1080:-1[fg];` +
-            `[bg]scale=1080:1920:force_original_aspect_ratio=increase,boxblur=20:1,crop=1080:1920[bl];` +
-            `[bl][fg]overlay=(W-w)/2:(H-h)/2"`;
+        if (hasLogo) {
+            // Logo appliqué sur la vidéo [fg] AVANT l'overlay sur le fond blur
+            return `"split=2[main][bg];` +
+                `[main]${zoomScale},${rotateFilter},crop=iw/${EFFECTS.zoom}:ih/${EFFECTS.zoom}:(iw-iw/${EFFECTS.zoom})/2+${EFFECTS.panX}:(ih-ih/${EFFECTS.zoom})/2+${EFFECTS.panY},${colorFilter},${grainFilter},${blurFilter}${mirrorFilter},scale=1080:-1[fg];` +
+                `[bg]scale=1080:1920:force_original_aspect_ratio=increase,boxblur=20:1,crop=1080:1920[bl];` +
+                `[1:v]${logoScale}${logoOpacity}[logo];` +
+                `[fg][logo]overlay=${logoPos}[fglogo];` +
+                `[bl][fglogo]overlay=(W-w)/2:(H-h)/2"`;
+        } else {
+            return `"split=2[main][bg];` +
+                `[main]${zoomScale},${rotateFilter},crop=iw/${EFFECTS.zoom}:ih/${EFFECTS.zoom}:(iw-iw/${EFFECTS.zoom})/2+${EFFECTS.panX}:(ih-ih/${EFFECTS.zoom})/2+${EFFECTS.panY},${colorFilter},${grainFilter},${blurFilter}${mirrorFilter},scale=1080:-1[fg];` +
+                `[bg]scale=1080:1920:force_original_aspect_ratio=increase,boxblur=20:1,crop=1080:1920[bl];` +
+                `[bl][fg]overlay=(W-w)/2:(H-h)/2"`;
+        }
     } else {
-        // Format crop simple: on applique tous les effets
-        return `"${zoomScale},${rotateFilter},crop=iw/${EFFECTS.zoom}:ih/${EFFECTS.zoom}:(iw-iw/${EFFECTS.zoom})/2+${EFFECTS.panX}:(ih-ih/${EFFECTS.zoom})/2+${EFFECTS.panY},` +
-            `${colorFilter},${grainFilter},${blurFilter},` +
-            `crop='min(iw,ih*9/16)':'min(ih,iw*16/9)':(iw-ow)/2:(ih-oh)/2,scale=1080:1920"`;
+        // Format crop simple
+        if (hasLogo) {
+            return `"${zoomScale},${rotateFilter},crop=iw/${EFFECTS.zoom}:ih/${EFFECTS.zoom}:(iw-iw/${EFFECTS.zoom})/2+${EFFECTS.panX}:(ih-ih/${EFFECTS.zoom})/2+${EFFECTS.panY},` +
+                `${colorFilter},${grainFilter},${blurFilter}${mirrorFilter},` +
+                `crop='min(iw,ih*9/16)':'min(ih,iw*16/9)':(iw-ow)/2:(ih-oh)/2,scale=1080:1920[vid];` +
+                `[1:v]${logoScale}${logoOpacity}[logo];` +
+                `[vid][logo]overlay=${logoPos}"`;
+        } else {
+            return `"${zoomScale},${rotateFilter},crop=iw/${EFFECTS.zoom}:ih/${EFFECTS.zoom}:(iw-iw/${EFFECTS.zoom})/2+${EFFECTS.panX}:(ih-ih/${EFFECTS.zoom})/2+${EFFECTS.panY},` +
+                `${colorFilter},${grainFilter},${blurFilter}${mirrorFilter},` +
+                `crop='min(iw,ih*9/16)':'min(ih,iw*16/9)':(iw-ow)/2:(ih-oh)/2,scale=1080:1920"`;
+        }
     }
 }
 
@@ -564,8 +619,15 @@ async function downloadFFmpeg(destFolder) {
         console.log("(Automatic highlights mode)");
     }
 
+    // Vérifier si le logo est activé et existe
+    const logoFile = path.join(exeDir, EFFECTS.logo.file);
+    const hasLogo = EFFECTS.logo.enabled && fs.existsSync(logoFile);
+    if (EFFECTS.logo.enabled && !fs.existsSync(logoFile)) {
+        console.warn(`⚠️ Logo activé mais fichier "${EFFECTS.logo.file}" non trouvé. Logo désactivé.`);
+    }
+
     // Filtres vidéo et audio avec effets de transformation
-    const videoFilter = buildVideoFilter(useBlurFill);
+    const videoFilter = buildVideoFilter(useBlurFill, hasLogo);
     const audioFilter = buildAudioFilter();
 
     // Add logic to create a specific subfolder
@@ -599,9 +661,12 @@ async function downloadFFmpeg(destFolder) {
         const outName = path.join(outputDir, `segment_${i + 1}_${start}s_${end}s_${useBlurFill ? "blur" : "crop"}.mp4`);
 
         // Use the original video for cuts with video and audio effects
+        // Si logo activé, on ajoute le logo en entrée et on utilise -filter_complex
+        const logoInput = hasLogo ? `-i "${logoFile}" ` : '';
+        const filterFlag = hasLogo ? '-filter_complex' : '-vf';
         const cmd =
-            `"${ffmpeg}" -y -ss ${start} -t ${duration} -i "${tempFile}" ` +
-            `-vf ${videoFilter} -af ${audioFilter} -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k "${outName}"`;
+            `"${ffmpeg}" -y -ss ${start} -t ${duration} -i "${tempFile}" ${logoInput}` +
+            `${filterFlag} ${videoFilter} -af ${audioFilter} -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k "${outName}"`;
 
         console.log(`\n🔄 Processing range #${i + 1} → ${outName}`);
         try {
