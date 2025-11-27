@@ -103,8 +103,8 @@ function generateUniqueEffects() {
         bassGain: randomInRange(0.5, 2.5),          // +0.5 à +2.5 dB basses
         trebleGain: randomInRange(-1.5, 0.5),       // -1.5 à +0.5 dB aigus
 
-        // Vitesse très subtile (nouveau - très efficace anti-détection)
-        speed: randomInRange(0.98, 1.02),           // -2% à +2% vitesse
+        // Vitesse désactivée pour éviter désynchronisation audio/vidéo
+        speed: 1.0,                                 // Toujours 1.0 pour garder sync
 
         // Miroir horizontal (flip)
         mirror: true,
