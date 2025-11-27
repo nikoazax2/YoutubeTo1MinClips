@@ -32,51 +32,135 @@ function toSeconds(time) {
 }
 
 /**
- * Constantes d'effets subtils pour rendre chaque segment unique.
- * Ces valeurs sont fixes et suffisamment légères pour ne pas être perceptibles.
+ * SYSTÈME ANTI-DÉTECTION AVANCÉ
+ * Génère des variations aléatoires pour chaque segment afin de tromper
+ * les algorithmes de fingerprinting de TikTok/YouTube/Instagram.
  */
+
+// Fonction utilitaire pour générer un nombre aléatoire dans une plage
+function randomInRange(min, max, decimals = 4) {
+    const value = min + Math.random() * (max - min);
+    return parseFloat(value.toFixed(decimals));
+}
+
+// Fonction utilitaire pour choisir aléatoirement dans un tableau
+function randomChoice(arr) {
+    return arr[Math.floor(Math.random() * arr.length)];
+}
+
+/**
+ * Génère un ensemble d'effets UNIQUES pour chaque segment
+ * Chaque appel retourne des valeurs différentes pour contourner la détection
+ */
+function generateUniqueEffects() {
+    return {
+        // Colorimétrie avec variations
+        saturation: randomInRange(1.01, 1.06),      // +1% à +6% saturation
+        contrast: randomInRange(1.00, 1.04),        // +0% à +4% contraste
+        gamma: randomInRange(0.98, 1.04),           // -2% à +4% gamma
+        brightness: randomInRange(-0.02, 0.03),     // -2% à +3% luminosité
+
+        // Nouvelles modifications de couleur (anti-détection TikTok)
+        hue: randomInRange(-5, 5),                  // Rotation teinte -5° à +5°
+        colorTempR: randomInRange(0.97, 1.03),      // Balance rouge
+        colorTempG: randomInRange(0.98, 1.02),      // Balance vert
+        colorTempB: randomInRange(0.96, 1.04),      // Balance bleu
+
+        // Micro-rotation variable (en degrés)
+        rotationDeg: randomInRange(0.1, 0.5),       // 0.1° à 0.5°
+
+        // Zoom variable
+        zoom: randomInRange(1.01, 1.04),            // 1% à 4% de zoom
+
+        // Décalage horizontal/vertical variable
+        panX: randomInRange(2, 12),
+        panY: randomInRange(1, 8),
+
+        // Grain variable (bruit)
+        grain: randomInRange(2, 6),
+
+        // Flou/netteté variable
+        blur: randomInRange(0.2, 0.6),
+
+        // Ondulation/vaguelettes subtiles (décalage chromatique quasi invisible)
+        rgbaShiftH: randomInRange(-2, 2),           // Décalage horizontal des canaux
+        rgbaShiftV: randomInRange(-1, 1),           // Décalage vertical des canaux
+
+        // Vignette TRÈS subtile (quasi invisible mais modifie le fingerprint)
+        // angle proche de PI/2 (1.57) = très peu de vignette
+        vignetteAngle: randomInRange(1.3, 1.5),
+        vignetteX0: randomInRange(0.48, 0.52),
+        vignetteY0: randomInRange(0.48, 0.52),
+
+        // Légère distorsion de lens (nouveau)
+        lensK1: randomInRange(-0.02, 0.02),
+        lensK2: randomInRange(-0.01, 0.01),
+
+        // Audio : pitch shift variable
+        pitchShift: randomInRange(0.98, 1.03),      // -2% à +3%
+
+        // Audio : EQ variable
+        bassGain: randomInRange(0.5, 2.5),          // +0.5 à +2.5 dB basses
+        trebleGain: randomInRange(-1.5, 0.5),       // -1.5 à +0.5 dB aigus
+
+        // Vitesse très subtile (nouveau - très efficace anti-détection)
+        speed: randomInRange(0.98, 1.02),           // -2% à +2% vitesse
+
+        // Miroir horizontal (flip)
+        mirror: true,
+
+        // Logo/Watermark
+        logo: {
+            enabled: true,
+            file: 'logo.jpg',
+            position: 'bd',
+            scale: randomInRange(0.10, 0.14),       // Taille variable
+            opacity: randomInRange(0.85, 1.0),      // Opacité variable
+            margin: Math.floor(randomInRange(8, 15)),
+        },
+
+        // Paramètres d'encodage variables (nouveau)
+        crf: Math.floor(randomInRange(21, 25)),     // Qualité variable
+        preset: randomChoice(['fast', 'medium']),   // Preset variable
+    };
+}
+
+// Effets par défaut (utilisés pour l'affichage des valeurs de base)
 const EFFECTS = {
-    // Colorimétrie subtile
-    saturation: 1.02,      // +2% saturation
-    contrast: 1.01,        // +1% contraste
-    gamma: 1.01,           // +1% gamma
-    brightness: 0.01,      // +1% luminosité
-
-    // Micro-rotation (en degrés, converti en radians pour FFmpeg)
-    rotationDeg: 0.2,      // 0.2 degrés
-
-    // Zoom léger (1.02 = 2% de zoom)
+    saturation: 1.02,
+    contrast: 1.01,
+    gamma: 1.01,
+    brightness: 0.01,
+    hue: 0,
+    colorTempR: 1.0,
+    colorTempG: 1.0,
+    colorTempB: 1.0,
+    rotationDeg: 0.2,
     zoom: 1.02,
-
-    // Décalage horizontal/vertical pour le pan (en pixels)
     panX: 5,
     panY: 3,
-
-    // Grain subtil (intensité du bruit, 0-100)
     grain: 3,
-
-    // Flou subtil (valeur de unsharp: luma_msize_x:luma_msize_y:luma_amount)
-    blur: 0.3,             // légère accentuation/flou
-
-    // Audio : pitch shift (1.01 = +1%, sans changer la durée via rubberband ou atempo compensation)
+    blur: 0.3,
+    vignetteAngle: 1.4,
+    vignetteX0: 0.5,
+    vignetteY0: 0.5,
+    lensK1: 0,
+    lensK2: 0,
     pitchShift: 1.01,
-
-    // Audio : EQ léger (en dB)
-    bassGain: 1.5,         // +1.5 dB sur les basses
-    trebleGain: -0.5,      // -0.5 dB sur les aigus
-
-    // Miroir horizontal (flip)
-    mirror: true,         // true = vidéo miroir horizontalement
-
-    // Logo/Watermark
+    bassGain: 1.5,
+    trebleGain: -0.5,
+    speed: 1.0,
+    mirror: true,
     logo: {
-        enabled: true,              // true = afficher le logo
-        file: 'logo.jpg',           // nom du fichier logo
-        position: 'bd',             // hg=haut-gauche, hd=haut-droite, bg=bas-gauche, bd=bas-droite
-        scale: 0.12,                // taille du logo (15% de la largeur vidéo)
-        opacity: 1,               // opacité (0-1)
-        margin: 10,                 // marge en pixels depuis le bord
+        enabled: true,
+        file: 'logo.jpg',
+        position: 'bd',
+        scale: 0.12,
+        opacity: 1,
+        margin: 10,
     },
+    crf: 23,
+    preset: 'fast',
 };
 
 /**
@@ -97,87 +181,143 @@ function getLogoPosition(position, margin) {
 
 /**
  * Construit la chaîne de filtres vidéo pour les effets de transformation.
- * Inclut: colorimétrie, rotation, zoom avec pan, grain, miroir et logo.
+ * ANTI-DÉTECTION: Inclut colorimétrie, hue, colorbalance, vignette, rotation, zoom, grain, miroir, logo et watermark.
  * @param {boolean} useBlurFill - Si true, utilise le format blur fill, sinon crop simple
- * @param {boolean} hasLogo - Si true, le logo sera ajouté (input [1:v])
+ * @param {boolean} hasLogo - Si true, le logo sera ajouté
+ * @param {boolean} hasWatermark - Si true, le watermark sera ajouté par-dessus la vidéo
+ * @param {object} effects - Effets uniques générés pour ce segment
  * @returns {string} - La chaîne de filtres vidéo pour FFmpeg
  */
-function buildVideoFilter(useBlurFill, hasLogo = false) {
-    const rotationRad = (EFFECTS.rotationDeg * Math.PI / 180).toFixed(6);
+function buildVideoFilter(useBlurFill, hasLogo = false, hasWatermark = false, effects = EFFECTS) {
+    const rotationRad = (effects.rotationDeg * Math.PI / 180).toFixed(6);
 
-    // Filtre de colorimétrie
-    const colorFilter = `eq=saturation=${EFFECTS.saturation}:contrast=${EFFECTS.contrast}:gamma=${EFFECTS.gamma}:brightness=${EFFECTS.brightness}`;
+    // Filtre de colorimétrie de base
+    const colorFilter = `eq=saturation=${effects.saturation}:contrast=${effects.contrast}:gamma=${effects.gamma}:brightness=${effects.brightness}`;
 
-    // Filtre de rotation avec zoom intégré (rotate gère le zoom via ow/oh)
-    // On scale d'abord pour le zoom, puis rotate, puis crop pour recentrer
-    const zoomScale = `scale=iw*${EFFECTS.zoom}:ih*${EFFECTS.zoom}`;
+    // NOUVEAU: Filtre de teinte (hue shift) - très efficace anti-détection
+    const hueFilter = `hue=h=${effects.hue}`;
+
+    // NOUVEAU: Balance des couleurs RGB (colorbalance) - modifie le fingerprint
+    const colorBalanceFilter = `colorbalance=rs=${(effects.colorTempR - 1).toFixed(3)}:gs=${(effects.colorTempG - 1).toFixed(3)}:bs=${(effects.colorTempB - 1).toFixed(3)}`;
+
+    // Remplacé vignette par un léger décalage de couleur (invisible mais modifie le fingerprint)
+    // curves permet de modifier très légèrement les tons sans effet visible
+    const curvesFilter = `curves=r='0/0 1/1':g='0/0 1/1':b='0/0.01 1/0.99'`;
+
+    // NOUVEAU: Vaguelettes/ondulations subtiles via décalage chromatique (rgbashift)
+    // Décale légèrement les canaux R/G/B - quasi invisible mais modifie chaque pixel
+    const rgbaShiftH = effects.rgbaShiftH || 0;
+    const rgbaShiftV = effects.rgbaShiftV || 0;
+    const waveFilter = `rgbashift=rh=${rgbaShiftH}:rv=${rgbaShiftV}:gh=${-rgbaShiftH}:gv=${-rgbaShiftV}:bh=${Math.round(rgbaShiftH/2)}:bv=${Math.round(rgbaShiftV/2)}`;
+
+    // Filtre de rotation avec zoom intégré
+    const zoomScale = `scale=iw*${effects.zoom}:ih*${effects.zoom}`;
     const rotateFilter = `rotate=${rotationRad}:c=black@0:ow=rotw(${rotationRad}):oh=roth(${rotationRad})`;
 
-    // Filtre de grain (noise)
-    const grainFilter = `noise=alls=${EFFECTS.grain}:allf=t`;
+    // Filtre de grain (noise) - avec composante couleur pour plus d'unicité
+    const grainFilter = `noise=alls=${effects.grain}:allf=t+u`;
 
-    // Filtre de flou subtil (unsharp pour légère accentuation ou flou)
-    const blurFilter = `unsharp=5:5:${EFFECTS.blur}:5:5:0`;
+    // Filtre de flou subtil
+    const blurFilter = `unsharp=5:5:${effects.blur}:5:5:0`;
 
     // Filtre miroir horizontal
-    const mirrorFilter = EFFECTS.mirror ? ',hflip' : '';
+    const mirrorFilter = effects.mirror ? ',hflip' : '';
+
+    // NOUVEAU: Filtre de vitesse vidéo (setpts) - très efficace contre fingerprinting
+    const speedFilter = effects.speed !== 1.0 ? `setpts=${(1/effects.speed).toFixed(4)}*PTS` : '';
+
+    // Combinaison des filtres de couleur avancés (sans vignette qui cachait la vidéo)
+    const advancedColorFilters = `${colorFilter},${hueFilter},${colorBalanceFilter},${curvesFilter},${waveFilter}`;
 
     // Logo overlay (si activé)
-    const logoPos = getLogoPosition(EFFECTS.logo.position, EFFECTS.logo.margin);
-    const logoScale = `scale=1080*${EFFECTS.logo.scale}:-1`;
-    const logoOpacity = EFFECTS.logo.opacity < 1 ? `,format=rgba,colorchannelmixer=aa=${EFFECTS.logo.opacity}` : '';
+    const logoPos = getLogoPosition(effects.logo.position, effects.logo.margin);
+    const logoScale = `scale=1080*${effects.logo.scale}:-1`;
+    const logoOpacity = effects.logo.opacity < 1 ? `,format=rgba,colorchannelmixer=aa=${effects.logo.opacity}` : '';
+
+    // Ajout conditionnel du filtre de vitesse
+    const speedPart = speedFilter ? `,${speedFilter}` : '';
+
+    // Index des inputs: [0:v]=vidéo, [1:v]=watermark (si présent), [2:v]=logo (si watermark+logo) ou [1:v]=logo (si logo seul)
+    const watermarkInput = hasWatermark ? (hasLogo ? '[1:v]' : '[1:v]') : '';
+    const logoInput = hasLogo ? (hasWatermark ? '[2:v]' : '[1:v]') : '';
+
+    // Base de transformation vidéo
+    const videoTransform = `${zoomScale},${rotateFilter},crop=iw/${effects.zoom}:ih/${effects.zoom}:(iw-iw/${effects.zoom})/2+${effects.panX}:(ih-ih/${effects.zoom})/2+${effects.panY},${advancedColorFilters},${grainFilter},${blurFilter}${mirrorFilter}${speedPart}`;
 
     if (useBlurFill) {
         // Format blur fill: fond flou + vidéo centrée
-        if (hasLogo) {
-            // Logo appliqué sur la vidéo [fg] AVANT l'overlay sur le fond blur
-            return `"split=2[main][bg];` +
-                `[main]${zoomScale},${rotateFilter},crop=iw/${EFFECTS.zoom}:ih/${EFFECTS.zoom}:(iw-iw/${EFFECTS.zoom})/2+${EFFECTS.panX}:(ih-ih/${EFFECTS.zoom})/2+${EFFECTS.panY},${colorFilter},${grainFilter},${blurFilter}${mirrorFilter},scale=1080:-1[fg];` +
-                `[bg]scale=1080:1920:force_original_aspect_ratio=increase,boxblur=20:1,crop=1080:1920[bl];` +
-                `[1:v]${logoScale}${logoOpacity}[logo];` +
+        let filter = `"split=2[main][bg];` +
+            `[main]${videoTransform},scale=1080:-1[fg];` +
+            `[bg]scale=1080:1920:force_original_aspect_ratio=increase,boxblur=20:1,crop=1080:1920[bl];`;
+
+        if (hasWatermark && hasLogo) {
+            // Watermark + Logo: watermark sur fg, puis logo, puis sur blur
+            filter += `${watermarkInput}scale=1080:-1[wm];` +
+                `[fg][wm]overlay=0:(H-h)/2[fgwm];` +
+                `${logoInput}${logoScale}${logoOpacity}[logo];` +
+                `[fgwm][logo]overlay=${logoPos}[fglogo];` +
+                `[bl][fglogo]overlay=(W-w)/2:(H-h)/2"`;
+        } else if (hasWatermark) {
+            // Watermark seul: watermark sur fg, puis sur blur
+            filter += `${watermarkInput}scale=1080:-1[wm];` +
+                `[fg][wm]overlay=0:(H-h)/2[fgwm];` +
+                `[bl][fgwm]overlay=(W-w)/2:(H-h)/2"`;
+        } else if (hasLogo) {
+            // Logo seul
+            filter += `${logoInput}${logoScale}${logoOpacity}[logo];` +
                 `[fg][logo]overlay=${logoPos}[fglogo];` +
                 `[bl][fglogo]overlay=(W-w)/2:(H-h)/2"`;
         } else {
-            return `"split=2[main][bg];` +
-                `[main]${zoomScale},${rotateFilter},crop=iw/${EFFECTS.zoom}:ih/${EFFECTS.zoom}:(iw-iw/${EFFECTS.zoom})/2+${EFFECTS.panX}:(ih-ih/${EFFECTS.zoom})/2+${EFFECTS.panY},${colorFilter},${grainFilter},${blurFilter}${mirrorFilter},scale=1080:-1[fg];` +
-                `[bg]scale=1080:1920:force_original_aspect_ratio=increase,boxblur=20:1,crop=1080:1920[bl];` +
-                `[bl][fg]overlay=(W-w)/2:(H-h)/2"`;
+            // Ni watermark ni logo
+            filter += `[bl][fg]overlay=(W-w)/2:(H-h)/2"`;
         }
+        return filter;
     } else {
         // Format crop simple
-        if (hasLogo) {
-            return `"${zoomScale},${rotateFilter},crop=iw/${EFFECTS.zoom}:ih/${EFFECTS.zoom}:(iw-iw/${EFFECTS.zoom})/2+${EFFECTS.panX}:(ih-ih/${EFFECTS.zoom})/2+${EFFECTS.panY},` +
-                `${colorFilter},${grainFilter},${blurFilter}${mirrorFilter},` +
-                `crop='min(iw,ih*9/16)':'min(ih,iw*16/9)':(iw-ow)/2:(ih-oh)/2,scale=1080:1920[vid];` +
-                `[1:v]${logoScale}${logoOpacity}[logo];` +
+        let filter = `"${videoTransform},` +
+            `crop='min(iw,ih*9/16)':'min(ih,iw*16/9)':(iw-ow)/2:(ih-oh)/2,scale=1080:1920[vid];`;
+
+        if (hasWatermark && hasLogo) {
+            filter += `${watermarkInput}scale=1080:1920[wm];` +
+                `[vid][wm]overlay=0:0[vidwm];` +
+                `${logoInput}${logoScale}${logoOpacity}[logo];` +
+                `[vidwm][logo]overlay=${logoPos}"`;
+        } else if (hasWatermark) {
+            filter += `${watermarkInput}scale=1080:1920[wm];` +
+                `[vid][wm]overlay=0:0"`;
+        } else if (hasLogo) {
+            filter += `${logoInput}${logoScale}${logoOpacity}[logo];` +
                 `[vid][logo]overlay=${logoPos}"`;
         } else {
-            return `"${zoomScale},${rotateFilter},crop=iw/${EFFECTS.zoom}:ih/${EFFECTS.zoom}:(iw-iw/${EFFECTS.zoom})/2+${EFFECTS.panX}:(ih-ih/${EFFECTS.zoom})/2+${EFFECTS.panY},` +
-                `${colorFilter},${grainFilter},${blurFilter}${mirrorFilter},` +
+            // Enlever le [vid]; final et fermer les guillemets
+            filter = `"${videoTransform},` +
                 `crop='min(iw,ih*9/16)':'min(ih,iw*16/9)':(iw-ow)/2:(ih-oh)/2,scale=1080:1920"`;
         }
+        return filter;
     }
 }
 
 /**
  * Construit la chaîne de filtres audio pour les effets de transformation.
- * Inclut: EQ (basses/aigus) et pitch shift sans changement de durée.
+ * ANTI-DÉTECTION: Inclut EQ variable, pitch shift et ajustement de vitesse.
+ * @param {object} effects - Effets uniques générés pour ce segment
  * @returns {string} - La chaîne de filtres audio pour FFmpeg
  */
-function buildAudioFilter() {
-    // EQ: bass et treble filters
-    const bassFilter = `bass=g=${EFFECTS.bassGain}:f=100`;
-    const trebleFilter = `treble=g=${EFFECTS.trebleGain}:f=3000`;
+function buildAudioFilter(effects = EFFECTS) {
+    // EQ: bass et treble filters avec valeurs variables
+    const bassFilter = `bass=g=${effects.bassGain}:f=100`;
+    const trebleFilter = `treble=g=${effects.trebleGain}:f=3000`;
 
     // Pitch shift sans changer la durée:
-    // On utilise asetrate pour changer le pitch, aresample pour revenir au sample rate original,
-    // puis atempo pour compenser le changement de vitesse
-    // Note: YouTube utilise généralement 48000 Hz
     const sampleRate = 48000;
-    const atempoCompensation = (1 / EFFECTS.pitchShift).toFixed(6);
-    const pitchFilter = `asetrate=${sampleRate}*${EFFECTS.pitchShift},aresample=${sampleRate},atempo=${atempoCompensation}`;
+    const atempoCompensation = (1 / effects.pitchShift).toFixed(6);
+    const pitchFilter = `asetrate=${sampleRate}*${effects.pitchShift},aresample=${sampleRate},atempo=${atempoCompensation}`;
 
-    return `"${bassFilter},${trebleFilter},${pitchFilter}"`;
+    // NOUVEAU: Ajustement de vitesse audio pour correspondre à la vidéo
+    // atempo accepte des valeurs entre 0.5 et 2.0
+    const speedFilter = effects.speed !== 1.0 ? `,atempo=${effects.speed.toFixed(4)}` : '';
+
+    return `"${bassFilter},${trebleFilter},${pitchFilter}${speedFilter}"`;
 }
 
 /**
@@ -621,14 +761,17 @@ async function downloadFFmpeg(destFolder) {
 
     // Vérifier si le logo est activé et existe
     const logoFile = path.join(exeDir, EFFECTS.logo.file);
-    const hasLogo = EFFECTS.logo.enabled && fs.existsSync(logoFile);
-    if (EFFECTS.logo.enabled && !fs.existsSync(logoFile)) {
+    const hasLogoFile = fs.existsSync(logoFile);
+    if (EFFECTS.logo.enabled && !hasLogoFile) {
         console.warn(`⚠️ Logo activé mais fichier "${EFFECTS.logo.file}" non trouvé. Logo désactivé.`);
     }
 
-    // Filtres vidéo et audio avec effets de transformation
-    const videoFilter = buildVideoFilter(useBlurFill, hasLogo);
-    const audioFilter = buildAudioFilter();
+    // Vérifier si le watermark existe
+    const watermarkFile = path.join(exeDir, 'watermark.png');
+    const hasWatermarkFile = fs.existsSync(watermarkFile);
+    if (hasWatermarkFile) {
+        console.log(`✅ Watermark trouvé: watermark.png (sera appliqué sur la vidéo)`);
+    }
 
     // Add logic to create a specific subfolder
     const videoName = youtubeURL ? youtubeURL.split('v=')[1] || 'video' : 'video';
@@ -650,7 +793,9 @@ async function downloadFFmpeg(destFolder) {
         fs.mkdirSync(outputDir);
     }
 
-    // Process each range
+    console.log("\n🎭 MODE ANTI-DÉTECTION ACTIVÉ - Chaque segment aura des effets UNIQUES");
+
+    // Process each range with UNIQUE effects per segment
     for (let i = 0; i < expandedRanges.length; i++) {
         const { start, end } = expandedRanges[i];
         if (end <= start) {
@@ -658,17 +803,42 @@ async function downloadFFmpeg(destFolder) {
             continue;
         }
         const duration = end - start;
+
+        // 🎲 GÉNÉRATION D'EFFETS UNIQUES POUR CE SEGMENT
+        const uniqueEffects = generateUniqueEffects();
+        const hasLogo = uniqueEffects.logo.enabled && hasLogoFile;
+        const hasWatermark = hasWatermarkFile;
+
+        // Construire les filtres avec les effets uniques
+        const videoFilter = buildVideoFilter(useBlurFill, hasLogo, hasWatermark, uniqueEffects);
+        const audioFilter = buildAudioFilter(uniqueEffects);
+
+        // 📝 MÉTADONNÉES UNIQUES pour éviter le fingerprinting
+        const uniqueId = `${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+        const fakeDate = new Date(Date.now() - Math.floor(Math.random() * 86400000 * 30)); // Date aléatoire dans les 30 derniers jours
+        const metadataArgs = `-metadata title="clip_${uniqueId}" ` +
+            `-metadata creation_time="${fakeDate.toISOString()}" ` +
+            `-metadata encoder="custom_${Math.random().toString(36).slice(2, 8)}" ` +
+            `-metadata comment="${Math.random().toString(36).slice(2, 18)}"`;
+
         const outName = path.join(outputDir, `segment_${i + 1}_${start}s_${end}s_${useBlurFill ? "blur" : "crop"}.mp4`);
 
-        // Use the original video for cuts with video and audio effects
-        // Si logo activé, on ajoute le logo en entrée et on utilise -filter_complex
+        // Construire les inputs FFmpeg: vidéo + watermark (optionnel) + logo (optionnel)
+        // Ordre: [0:v]=vidéo, [1:v]=watermark, [2:v]=logo (ou [1:v]=logo si pas de watermark)
+        const watermarkInput = hasWatermark ? `-i "${watermarkFile}" ` : '';
         const logoInput = hasLogo ? `-i "${logoFile}" ` : '';
-        const filterFlag = hasLogo ? '-filter_complex' : '-vf';
+        const needsFilterComplex = hasLogo || hasWatermark;
+        const filterFlag = needsFilterComplex ? '-filter_complex' : '-vf';
+
         const cmd =
-            `"${ffmpeg}" -y -ss ${start} -t ${duration} -i "${tempFile}" ${logoInput}` +
-            `${filterFlag} ${videoFilter} -af ${audioFilter} -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k "${outName}"`;
+            `"${ffmpeg}" -y -ss ${start} -t ${duration} -i "${tempFile}" ${watermarkInput}${logoInput}` +
+            `${filterFlag} ${videoFilter} -af ${audioFilter} ` +
+            `-c:v libx264 -preset ${uniqueEffects.preset} -crf ${uniqueEffects.crf} ` +
+            `-c:a aac -b:a ${Math.floor(randomInRange(120, 136))}k ` +
+            `${metadataArgs} "${outName}"`;
 
         console.log(`\n🔄 Processing range #${i + 1} → ${outName}`);
+        console.log(`   🎲 Effets: sat=${uniqueEffects.saturation.toFixed(2)} hue=${uniqueEffects.hue.toFixed(1)}° speed=${uniqueEffects.speed.toFixed(3)} pitch=${uniqueEffects.pitchShift.toFixed(3)}${hasWatermark ? ' +watermark' : ''}`);
         try {
             execSync(cmd, { stdio: "inherit" });
         } catch {
