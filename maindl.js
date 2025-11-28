@@ -96,8 +96,8 @@ function generateUniqueEffects() {
         lensK1: randomInRange(-0.02, 0.02),
         lensK2: randomInRange(-0.01, 0.01),
 
-        // Audio : pitch shift variable
-        pitchShift: randomInRange(0.98, 1.03),      // -2% à +3%
+        // Audio : pitch shift désactivé pour maintenir la vitesse originale
+        pitchShift: 1.0,                            // Pas de modification du pitch
 
         // Audio : EQ variable
         bassGain: randomInRange(0.5, 2.5),          // +0.5 à +2.5 dB basses
@@ -146,7 +146,7 @@ const EFFECTS = {
     vignetteY0: 0.5,
     lensK1: 0,
     lensK2: 0,
-    pitchShift: 1.01,
+    pitchShift: 1.0,
     bassGain: 1.5,
     trebleGain: -0.5,
     speed: 1.0,
@@ -208,7 +208,7 @@ function buildVideoFilter(useBlurFill, hasLogo = false, hasWatermark = false, ef
     // Décale légèrement les canaux R/G/B - quasi invisible mais modifie chaque pixel
     const rgbaShiftH = effects.rgbaShiftH || 0;
     const rgbaShiftV = effects.rgbaShiftV || 0;
-    const waveFilter = `rgbashift=rh=${rgbaShiftH}:rv=${rgbaShiftV}:gh=${-rgbaShiftH}:gv=${-rgbaShiftV}:bh=${Math.round(rgbaShiftH/2)}:bv=${Math.round(rgbaShiftV/2)}`;
+    const waveFilter = `rgbashift=rh=${rgbaShiftH}:rv=${rgbaShiftV}:gh=${-rgbaShiftH}:gv=${-rgbaShiftV}:bh=${Math.round(rgbaShiftH / 2)}:bv=${Math.round(rgbaShiftV / 2)}`;
 
     // Filtre de rotation avec zoom intégré
     const zoomScale = `scale=iw*${effects.zoom}:ih*${effects.zoom}`;
@@ -224,7 +224,7 @@ function buildVideoFilter(useBlurFill, hasLogo = false, hasWatermark = false, ef
     const mirrorFilter = effects.mirror ? ',hflip' : '';
 
     // NOUVEAU: Filtre de vitesse vidéo (setpts) - très efficace contre fingerprinting
-    const speedFilter = effects.speed !== 1.0 ? `setpts=${(1/effects.speed).toFixed(4)}*PTS` : '';
+    const speedFilter = effects.speed !== 1.0 ? `setpts=${(1 / effects.speed).toFixed(4)}*PTS` : '';
 
     // Combinaison des filtres de couleur avancés (sans vignette qui cachait la vidéo)
     const advancedColorFilters = `${colorFilter},${hueFilter},${colorBalanceFilter},${curvesFilter},${waveFilter}`;
@@ -768,7 +768,8 @@ async function downloadFFmpeg(destFolder) {
 
     // Vérifier si le watermark existe
     const watermarkFile = path.join(exeDir, 'watermark.png');
-    const hasWatermarkFile = fs.existsSync(watermarkFile);
+    // const hasWatermarkFile = fs.existsSync(watermarkFile);
+    const hasWatermarkFile = false;
     if (hasWatermarkFile) {
         console.log(`✅ Watermark trouvé: watermark.png (sera appliqué sur la vidéo)`);
     }
