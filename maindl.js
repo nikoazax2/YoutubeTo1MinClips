@@ -7,12 +7,23 @@ const readline = require("readline");
 const https = require("https");
 const unzipper = require("unzipper");
 
-// Whisper pour la transcription locale (npm install whisper-node)
-let whisper;
-try {
-    whisper = require("whisper-node").default;
-} catch {
-    whisper = null;
+// Whisper pour la transcription locale (via @xenova/transformers)
+let whisperPipeline = null;
+
+async function initWhisper() {
+    if (whisperPipeline) return whisperPipeline;
+    try {
+        const { pipeline } = await import('@xenova/transformers');
+        console.log("🔄 Chargement du modèle Whisper (première utilisation peut prendre du temps)...");
+        whisperPipeline = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small', {
+            quantized: true // Utilise le modèle quantifié pour de meilleures performances
+        });
+        console.log("✅ Modèle Whisper chargé!");
+        return whisperPipeline;
+    } catch (err) {
+        console.error("⚠️ Impossible de charger @xenova/transformers:", err.message);
+        return null;
+    }
 }
 
 // Speed-up removed: the video will be processed at normal speed
@@ -497,9 +508,11 @@ function formatSrtTime(seconds) {
 function burnSubtitles(videoFile, srtFile, outputFile, ffmpegPath) {
     console.log("\n📝 Incrustation des sous-titres...");
 
-    // Style des sous-titres: gros, centré en bas, fond semi-transparent
-    // Force=1 pour forcer le style même si le SRT en a un
-    const subtitleStyle = "FontName=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,Bold=1,Outline=2,Shadow=1,MarginV=50";
+    // Style des sous-titres: petits, positionnés dans la zone de blur (sous la vidéo)
+    // MarginV=580 pour positionner sous la vidéo centrée (dans le blur du bas)
+    // MarginL et MarginR pour éviter le dépassement horizontal
+    // WrapStyle=2 pour retour à la ligne automatique si texte trop long
+    const subtitleStyle = "FontName=Arial,FontSize=14,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,Bold=1,Outline=1,Shadow=1,MarginV=580,MarginL=50,MarginR=50,WrapStyle=2,Alignment=2";
 
     // Échapper les caractères spéciaux pour Windows
     const srtFileEscaped = srtFile.replace(/\\/g, '/').replace(/:/g, '\\:');
@@ -544,39 +557,47 @@ function extractAudioForWhisper(videoFile, outputWav, ffmpegPath) {
  * @returns {Promise<string|null>} - Chemin du SRT ou null si échec
  */
 async function transcribeWithWhisper(audioFile, outputSrt, language = 'fr') {
-    if (!whisper) {
-        console.log("⚠️ whisper-node non installé. Exécutez: npm install whisper-node");
-        return null;
-    }
-
     console.log("\n🎤 Transcription avec Whisper (cela peut prendre du temps)...");
 
     try {
-        const options = {
-            modelName: "base",  // Modèles: tiny, base, small, medium, large
-            whisperOptions: {
-                language: language,
-                word_timestamps: false
+        const transcriber = await initWhisper();
+        if (!transcriber) {
+            console.log("⚠️ Whisper non disponible.");
+            return null;
+        }
+
+        // Transcrire avec @xenova/transformers
+        const result = await transcriber(audioFile, {
+            language: language,
+            task: 'transcribe',
+            return_timestamps: true,
+            chunk_length_s: 30,
+            stride_length_s: 5
+        });
+
+        if (!result || !result.chunks || result.chunks.length === 0) {
+            // Si pas de chunks mais du texte, créer un seul segment
+            if (result && result.text) {
+                const srtContent = `1\n00:00:00,000 --> 00:01:00,000\n${result.text.trim()}\n`;
+                fs.writeFileSync(outputSrt, srtContent);
+                console.log("✅ Transcription terminée: 1 segment.");
+                return outputSrt;
             }
-        };
-
-        const transcript = await whisper(audioFile, options);
-
-        if (!transcript || transcript.length === 0) {
             console.log("⚠️ Aucune transcription générée.");
             return null;
         }
 
-        // Convertir le transcript en format SRT
-        const srtContent = transcript.map((segment, index) => {
-            // Convertir les timestamps de format "HH:MM:SS.mmm" vers "HH:MM:SS,mmm"
-            const startSrt = segment.start.replace('.', ',');
-            const endSrt = segment.end.replace('.', ',');
-            return `${index + 1}\n${startSrt} --> ${endSrt}\n${segment.speech.trim()}\n`;
+        // Convertir les chunks en format SRT
+        const srtContent = result.chunks.map((chunk, index) => {
+            const startTime = chunk.timestamp[0] || 0;
+            const endTime = chunk.timestamp[1] || startTime + 5;
+            const startSrt = formatSrtTime(startTime);
+            const endSrt = formatSrtTime(endTime);
+            return `${index + 1}\n${startSrt} --> ${endSrt}\n${chunk.text.trim()}\n`;
         }).join('\n');
 
         fs.writeFileSync(outputSrt, srtContent);
-        console.log(`✅ Transcription terminée: ${transcript.length} segments.`);
+        console.log(`✅ Transcription terminée: ${result.chunks.length} segments.`);
         return outputSrt;
 
     } catch (err) {
@@ -676,6 +697,10 @@ async function downloadFFmpeg(destFolder) {
         if (reuse.toLowerCase() === "n") {
             videoExists = false; // Indicates that there is no existing video to reuse
             youtubeURL = await ask("YouTube link: ");
+        } else {
+            // Demander l'URL pour les sous-titres même si on réutilise la vidéo
+            youtubeURL = await ask("YouTube link (pour sous-titres, laisser vide pour ignorer): ");
+            if (!youtubeURL.trim()) youtubeURL = null;
         }
     }
 
@@ -930,11 +955,9 @@ async function downloadFFmpeg(destFolder) {
             // 🎤 SOUS-TITRES AUTOMATIQUES (Whisper ou YouTube)
             let clipSrtFile = null;
 
-            // Priorité 1: Whisper (transcription locale)
-            if (whisper) {
-                console.log("\n🎤 Génération des sous-titres avec Whisper...");
-                clipSrtFile = await generateWhisperSubtitles(finalOutputName, outputDir, clipNumber, ffmpeg);
-            }
+            // Priorité 1: Whisper (transcription locale via @xenova/transformers)
+            console.log("\n🎤 Génération des sous-titres avec Whisper...");
+            clipSrtFile = await generateWhisperSubtitles(finalOutputName, outputDir, clipNumber, ffmpeg);
 
             // Priorité 2: Sous-titres YouTube (si Whisper non disponible ou a échoué)
             if (!clipSrtFile && youtubeSrtFile) {

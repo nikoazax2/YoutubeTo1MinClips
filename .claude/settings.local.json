@@ -2,7 +2,17 @@
   "permissions": {
     "allow": [
       "Bash(find:*)",
-      "Bash(node --check:*)"
+      "Bash(node --check:*)",
+      "Bash(del \"\\?\\c:\\Projets\\YoutubeTo1MinClips\\nul\")",
+      "Bash(cmd /c \"del \\?\\c:\\Projets\\YoutubeTo1MinClips\\nul\")",
+      "Bash(powershell -Command \"Remove-Item -Path ''\\?\\c:\\Projets\\YoutubeTo1MinClips\\nul'' -Force\")",
+      "Bash(powershell -Command \"Remove-Item -LiteralPath ''\\?\\C:\\Projets\\YoutubeTo1MinClips\\nul'' -Force\")",
+      "Bash(cmd //c \"del /f /q \\\\?\\C:\\Projets\\YoutubeTo1MinClips\\nul\")",
+      "Bash(python -c \"import os; os.remove(r''\\\\?\\C:\\Projets\\YoutubeTo1MinClips\\nul'')\")",
+      "Bash(node -e \"const fs = require(''fs''); fs.unlinkSync(''\\\\\\\\?\\\\C:\\\\Projets\\\\YoutubeTo1MinClips\\\\nul'')\")",
+      "Bash(node -e \"const fs = require(''fs''); const path = String.raw\\`\\\\?\\C:\\Projets\\YoutubeTo1MinClips\\nul\\`; fs.unlinkSync(path)\")",
+      "Bash(node:*)",
+      "Bash(rm:*)"
     ],
     "deny": [],
     "ask": []

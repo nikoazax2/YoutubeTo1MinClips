@@ -7,8 +7,8 @@
         "build:win": "pkg maindl.js --targets node18-win-x64 --output maindl.exe"
     },
     "dependencies": {
-        "unzipper": "^0.12.3",
-        "whisper-node": "^1.1.0"
+        "@xenova/transformers": "^2.17.2",
+        "unzipper": "^0.12.3"
     },
     "devDependencies": {
         "pkg": "^5.8.1"
