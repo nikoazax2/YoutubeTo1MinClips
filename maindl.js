@@ -7,6 +7,14 @@ const readline = require("readline");
 const https = require("https");
 const unzipper = require("unzipper");
 
+// Whisper pour la transcription locale (npm install whisper-node)
+let whisper;
+try {
+    whisper = require("whisper-node").default;
+} catch {
+    whisper = null;
+}
+
 // Speed-up removed: the video will be processed at normal speed
 
 const rl = readline.createInterface({
@@ -308,184 +316,301 @@ function buildAudioFilter(effects = EFFECTS) {
     const bassFilter = `bass=g=${effects.bassGain}:f=100`;
     const trebleFilter = `treble=g=${effects.trebleGain}:f=3000`;
 
-    // Pitch shift sans changer la durée:
-    const sampleRate = 48000;
-    const atempoCompensation = (1 / effects.pitchShift).toFixed(6);
-    const pitchFilter = `asetrate=${sampleRate}*${effects.pitchShift},aresample=${sampleRate},atempo=${atempoCompensation}`;
+    // Pitch shift: seulement si pitchShift != 1.0 pour éviter désynchronisation
+    let pitchFilter = '';
+    if (effects.pitchShift !== 1.0) {
+        const sampleRate = 48000;
+        const atempoCompensation = (1 / effects.pitchShift).toFixed(6);
+        pitchFilter = `,asetrate=${sampleRate}*${effects.pitchShift},aresample=${sampleRate},atempo=${atempoCompensation}`;
+    }
 
-    // NOUVEAU: Ajustement de vitesse audio pour correspondre à la vidéo
+    // Ajustement de vitesse audio pour correspondre à la vidéo
     // atempo accepte des valeurs entre 0.5 et 2.0
     const speedFilter = effects.speed !== 1.0 ? `,atempo=${effects.speed.toFixed(4)}` : '';
 
-    return `"${bassFilter},${trebleFilter},${pitchFilter}${speedFilter}"`;
+    return `"${bassFilter},${trebleFilter}${pitchFilter}${speedFilter}"`;
 }
 
 /**
- * Local heuristic to extract "best moments" from a video you don't own.
- * Assumptions:
- *  - The already downloaded video file is `video_temp.mp4` in the current folder (exeDir).
- *  - Only signals accessible without analytics are used: timestamps in description/comments + scene cuts.
- *  - N fixed-length windows are proposed around the peaks of the combined score.
- *
- * Score per second = 3 * (nearby timestamp) + 1 * (scene cut density).
- * A window (spanSeconds) is slid and the best non-overlapping are taken.
- *
- * @param {string} videoUrl YouTube URL
- * @param {object} [opts]
- * @param {number} [opts.maxHighlights=5] Number of segments to return
- * @param {number} [opts.spanSeconds=30] Duration of a segment in seconds
- * @param {number} [opts.sceneThreshold=0.4] ffmpeg scene detection threshold
- * @param {boolean} [opts.includeComments=true] Enable comment parsing (can be slow)
- * @returns {Array<{start:number,end:number,score:number,reason:string}>}
+ * Télécharge les sous-titres YouTube (auto-générés ou manuels)
+ * @param {string} youtubeUrl - URL de la vidéo YouTube
+ * @param {string} outputDir - Dossier de sortie
+ * @param {string} ytDlpPath - Chemin vers yt-dlp
+ * @returns {string|null} - Chemin vers le fichier SRT ou null si pas de sous-titres
  */
-function getBestMoments(videoUrl, opts = {}) {
-    const {
-        maxHighlights = 5,
-        spanSeconds = 61, // par défaut 61 secondes
-        sceneThreshold = 0.4,
-        includeComments = true,
-    } = opts;
+function downloadYoutubeSubtitles(youtubeUrl, outputDir, ytDlpPath) {
+    const srtFile = path.join(outputDir, "youtube_subs.fr.srt");
+    const vttFile = path.join(outputDir, "youtube_subs.fr.vtt");
 
-    const exeDir = process.pkg ? path.dirname(process.execPath) : process.cwd();
-    const ytDlp = path.join(exeDir, "yt-dlp.exe");
-    const ffmpeg = path.join(exeDir, "ffmpeg.exe");
-    const tempFile = path.join(exeDir, "video_temp.mp4");
+    console.log("\n📝 Téléchargement des sous-titres YouTube...");
 
-    if (!fs.existsSync(tempFile)) {
-        console.warn("getBestMoments: video file not found: " + tempFile);
-        return [];
-    }
-    if (!fs.existsSync(ytDlp)) {
-        console.warn("getBestMoments: yt-dlp.exe not found.");
-        return [];
-    }
-    if (!fs.existsSync(ffmpeg)) {
-        console.warn("getBestMoments: ffmpeg.exe not found.");
-        return [];
-    }
-
-    // 1. Durée de la vidéo
-    let duration = 0;
     try {
-        // Force writing to stderr; execSync returns the error which we capture to read the duration
-        execSync(`"${ffmpeg}" -i "${tempFile}" -hide_banner`, { stdio: "pipe" });
+        // Essayer d'abord les sous-titres manuels français
+        execSync(
+            `"${ytDlpPath}" --write-sub --sub-lang fr --sub-format srt --skip-download -o "${path.join(outputDir, 'youtube_subs')}" "${youtubeUrl}"`,
+            { stdio: 'pipe' }
+        );
+        if (fs.existsSync(srtFile)) {
+            console.log("✅ Sous-titres manuels FR téléchargés!");
+            return srtFile;
+        }
+    } catch { /* pas de sous-titres manuels */ }
+
+    try {
+        // Essayer les sous-titres auto-générés français
+        execSync(
+            `"${ytDlpPath}" --write-auto-sub --sub-lang fr --sub-format srt --skip-download -o "${path.join(outputDir, 'youtube_subs')}" "${youtubeUrl}"`,
+            { stdio: 'pipe' }
+        );
+        if (fs.existsSync(srtFile)) {
+            console.log("✅ Sous-titres auto-générés FR téléchargés!");
+            return srtFile;
+        }
+        // Parfois yt-dlp télécharge en VTT, convertir si nécessaire
+        if (fs.existsSync(vttFile)) {
+            // Lire et convertir VTT en SRT basique
+            const vttContent = fs.readFileSync(vttFile, 'utf-8');
+            const srtContent = convertVttToSrt(vttContent);
+            fs.writeFileSync(srtFile, srtContent);
+            fs.unlinkSync(vttFile);
+            console.log("✅ Sous-titres auto-générés FR convertis!");
+            return srtFile;
+        }
+    } catch { /* pas de sous-titres auto FR */ }
+
+    console.log("⚠️ Pas de sous-titres français disponibles sur YouTube.");
+    return null;
+}
+
+/**
+ * Convertit un fichier VTT en SRT
+ * @param {string} vttContent - Contenu du fichier VTT
+ * @returns {string} - Contenu au format SRT
+ */
+function convertVttToSrt(vttContent) {
+    // Supprimer l'en-tête WEBVTT
+    let content = vttContent.replace(/^WEBVTT\n\n/, '');
+    // Supprimer les lignes de métadonnées (Kind:, Language:, etc.)
+    content = content.replace(/^(Kind|Language):.*\n/gm, '');
+    // Convertir les timestamps VTT (00:00:00.000) en SRT (00:00:00,000)
+    content = content.replace(/(\d{2}:\d{2}:\d{2})\.(\d{3})/g, '$1,$2');
+    // Ajouter les numéros de séquence
+    let index = 1;
+    const blocks = content.trim().split(/\n\n+/);
+    const srtBlocks = blocks.map(block => {
+        if (block.includes('-->')) {
+            return `${index++}\n${block}`;
+        }
+        return '';
+    }).filter(b => b);
+    return srtBlocks.join('\n\n');
+}
+
+/**
+ * Extrait les sous-titres correspondant aux segments sélectionnés
+ * @param {string} srtFile - Fichier SRT source complet
+ * @param {Array} segments - Liste des segments [{start, end}, ...]
+ * @param {string} outputFile - Fichier SRT de sortie
+ * @returns {string|null} - Chemin vers le fichier SRT extrait
+ */
+function extractSubtitlesForSegments(srtFile, segments, outputFile) {
+    if (!fs.existsSync(srtFile)) return null;
+
+    const content = fs.readFileSync(srtFile, 'utf-8');
+    const blocks = content.split(/\n\n+/).filter(b => b.trim());
+
+    let newSubs = [];
+    let newIndex = 1;
+    let timeOffset = 0; // Offset cumulé pour ajuster les timecodes
+
+    for (let segIdx = 0; segIdx < segments.length; segIdx++) {
+        const { start: segStart, end: segEnd } = segments[segIdx];
+
+        for (const block of blocks) {
+            const lines = block.split('\n');
+            if (lines.length < 2) continue;
+
+            // Trouver la ligne de timecode
+            let timeLineIdx = 0;
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].includes('-->')) {
+                    timeLineIdx = i;
+                    break;
+                }
+            }
+
+            const timeLine = lines[timeLineIdx];
+            const timeMatch = timeLine.match(/(\d{2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2}),(\d{3})/);
+            if (!timeMatch) continue;
+
+            const subStart = parseInt(timeMatch[1]) * 3600 + parseInt(timeMatch[2]) * 60 + parseInt(timeMatch[3]) + parseInt(timeMatch[4]) / 1000;
+            const subEnd = parseInt(timeMatch[5]) * 3600 + parseInt(timeMatch[6]) * 60 + parseInt(timeMatch[7]) + parseInt(timeMatch[8]) / 1000;
+
+            // Vérifier si ce sous-titre est dans le segment actuel
+            if (subStart >= segStart && subEnd <= segEnd) {
+                // Ajuster les timecodes par rapport au début du clip concaténé
+                const adjustedStart = subStart - segStart + timeOffset;
+                const adjustedEnd = subEnd - segStart + timeOffset;
+
+                const newStartStr = formatSrtTime(adjustedStart);
+                const newEndStr = formatSrtTime(adjustedEnd);
+
+                const textLines = lines.slice(timeLineIdx + 1).join('\n');
+                newSubs.push(`${newIndex}\n${newStartStr} --> ${newEndStr}\n${textLines}`);
+                newIndex++;
+            }
+        }
+
+        // Ajouter la durée du segment à l'offset pour le prochain segment
+        timeOffset += (segEnd - segStart);
+    }
+
+    if (newSubs.length === 0) {
+        console.log("⚠️ Aucun sous-titre trouvé pour ces segments.");
+        return null;
+    }
+
+    fs.writeFileSync(outputFile, newSubs.join('\n\n'));
+    console.log(`✅ ${newSubs.length} sous-titres extraits pour le clip.`);
+    return outputFile;
+}
+
+/**
+ * Formate un temps en secondes en format SRT (HH:MM:SS,mmm)
+ */
+function formatSrtTime(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    const ms = Math.round((seconds % 1) * 1000);
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')},${ms.toString().padStart(3, '0')}`;
+}
+
+/**
+ * Incruste les sous-titres dans la vidéo
+ * @param {string} videoFile - Vidéo source
+ * @param {string} srtFile - Fichier SRT
+ * @param {string} outputFile - Vidéo de sortie
+ * @param {string} ffmpegPath - Chemin vers ffmpeg
+ * @returns {boolean}
+ */
+function burnSubtitles(videoFile, srtFile, outputFile, ffmpegPath) {
+    console.log("\n📝 Incrustation des sous-titres...");
+
+    // Style des sous-titres: gros, centré en bas, fond semi-transparent
+    // Force=1 pour forcer le style même si le SRT en a un
+    const subtitleStyle = "FontName=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,Bold=1,Outline=2,Shadow=1,MarginV=50";
+
+    // Échapper les caractères spéciaux pour Windows
+    const srtFileEscaped = srtFile.replace(/\\/g, '/').replace(/:/g, '\\:');
+
+    const cmd = `"${ffmpegPath}" -y -i "${videoFile}" -vf "subtitles='${srtFileEscaped}':force_style='${subtitleStyle}'" -c:a copy "${outputFile}"`;
+
+    try {
+        execSync(cmd, { stdio: 'inherit' });
+        console.log("✅ Sous-titres incrustés avec succès!");
+        return true;
     } catch (err) {
-        const output = (err.stderr ? err.stderr.toString() : "") + (err.stdout ? err.stdout.toString() : "");
-        const match = output.match(/Duration: (\d+):(\d+):(\d+\.\d+)/);
-        if (match) {
-            const [, h, m, s] = match;
-            duration = (+h) * 3600 + (+m) * 60 + parseFloat(s);
-        }
+        console.error("⛔ Échec incrustation sous-titres:", err.message);
+        return false;
     }
-    if (!duration || isNaN(duration)) {
-        console.warn("getBestMoments: duration not determined.");
-        return [];
-    }
+}
 
-    // 2. Retrieve description (+ possible comments)
-    let rawText = "";
+/**
+ * Extrait l'audio d'une vidéo en format WAV 16kHz mono (requis par Whisper)
+ * @param {string} videoFile - Chemin vers la vidéo source
+ * @param {string} outputWav - Chemin vers le fichier WAV de sortie
+ * @param {string} ffmpegPath - Chemin vers ffmpeg
+ * @returns {boolean} - true si succès
+ */
+function extractAudioForWhisper(videoFile, outputWav, ffmpegPath) {
+    console.log("🎵 Extraction audio pour Whisper...");
+    const cmd = `"${ffmpegPath}" -y -i "${videoFile}" -ar 16000 -ac 1 -c:a pcm_s16le "${outputWav}"`;
     try {
-        rawText += execSync(`"${ytDlp}" --get-description "${videoUrl}"`, { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
-    } catch { /* ignore */ }
-    if (includeComments) {
-        try {
-            // Can be slow/large; can be limited later
-            rawText += "\n" + execSync(`"${ytDlp}" --get-comments "${videoUrl}"`, { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
-        } catch { /* ignore */ }
+        execSync(cmd, { stdio: 'pipe' });
+        console.log("✅ Audio extrait en WAV 16kHz mono.");
+        return true;
+    } catch (err) {
+        console.error("⛔ Échec extraction audio:", err.message);
+        return false;
+    }
+}
+
+/**
+ * Transcrit un fichier audio avec Whisper et génère un fichier SRT
+ * @param {string} audioFile - Fichier WAV 16kHz mono
+ * @param {string} outputSrt - Fichier SRT de sortie
+ * @param {string} language - Langue ('fr', 'en', 'auto')
+ * @returns {Promise<string|null>} - Chemin du SRT ou null si échec
+ */
+async function transcribeWithWhisper(audioFile, outputSrt, language = 'fr') {
+    if (!whisper) {
+        console.log("⚠️ whisper-node non installé. Exécutez: npm install whisper-node");
+        return null;
     }
 
-    // 3. Extract timestamps (MM:SS or HH:MM:SS) -> seconds
-    const timestampRegex = /\b(?:(\d{1,2}):)?(\d{1,2}):(\d{2})\b/g; // capture HH:MM:SS ou MM:SS
-    const timestampSeconds = [];
-    let m;
-    while ((m = timestampRegex.exec(rawText)) !== null) {
-        const [, hOpt, mPart, sPart] = m;
-        const hVal = hOpt ? parseInt(hOpt, 10) : 0;
-        const minVal = parseInt(mPart, 10);
-        const secVal = parseInt(sPart, 10);
-        const total = hVal * 3600 + minVal * 60 + secVal;
-        if (!isNaN(total) && total <= duration) timestampSeconds.push(total);
-    }
+    console.log("\n🎤 Transcription avec Whisper (cela peut prendre du temps)...");
 
-    // Frequency per second (window ±5s)
-    const timestampWeightRadius = 5;
-    const tsPresence = new Array(Math.ceil(duration) + 1).fill(0);
-    timestampSeconds.forEach(sec => {
-        const start = Math.max(0, sec - timestampWeightRadius);
-        const end = Math.min(tsPresence.length - 1, sec + timestampWeightRadius);
-        for (let i = start; i <= end; i++) tsPresence[i] += 1;
-    });
-
-    // 4. Scene detection -> list of times (secs) where significant change
-    let sceneCuts = [];
     try {
-        const cutOutput = execSync(`"${ffmpeg}" -i "${tempFile}" -vf "select='gt(scene,${sceneThreshold})',showinfo" -f null - 2>&1`, { encoding: "utf-8" });
-        const ptsRegex = /pts_time:([0-9]+\.[0-9]+)/g;
-        let mm;
-        while ((mm = ptsRegex.exec(cutOutput)) !== null) {
-            const t = parseFloat(mm[1]);
-            if (!isNaN(t) && t <= duration) sceneCuts.push(t);
+        const options = {
+            modelName: "base",  // Modèles: tiny, base, small, medium, large
+            whisperOptions: {
+                language: language,
+                word_timestamps: false
+            }
+        };
+
+        const transcript = await whisper(audioFile, options);
+
+        if (!transcript || transcript.length === 0) {
+            console.log("⚠️ Aucune transcription générée.");
+            return null;
         }
-    } catch {
-        // silent fallback
-    }
-    sceneCuts.sort((a, b) => a - b);
 
-    // Cut density per second (±2s)
-    const sceneRadius = 2;
-    const cutDensity = new Array(Math.ceil(duration) + 1).fill(0);
-    for (const cut of sceneCuts) {
-        const base = Math.round(cut);
-        const start = Math.max(0, base - sceneRadius);
-        const end = Math.min(cutDensity.length - 1, base + sceneRadius);
-        for (let i = start; i <= end; i++) cutDensity[i] += 1;
-    }
+        // Convertir le transcript en format SRT
+        const srtContent = transcript.map((segment, index) => {
+            // Convertir les timestamps de format "HH:MM:SS.mmm" vers "HH:MM:SS,mmm"
+            const startSrt = segment.start.replace('.', ',');
+            const endSrt = segment.end.replace('.', ',');
+            return `${index + 1}\n${startSrt} --> ${endSrt}\n${segment.speech.trim()}\n`;
+        }).join('\n');
 
-    // 5. Combined score per second
-    const scores = new Array(Math.ceil(duration) + 1).fill(0);
-    for (let i = 0; i < scores.length; i++) {
-        scores[i] = tsPresence[i] * 3 + cutDensity[i] * 1; // pondérations simples
-    }
+        fs.writeFileSync(outputSrt, srtContent);
+        console.log(`✅ Transcription terminée: ${transcript.length} segments.`);
+        return outputSrt;
 
-    // 6. Sliding window to find best segments
-    const windowScores = [];
-    const span = spanSeconds;
-    const maxStart = Math.max(0, Math.floor(duration - span));
-    // Pré-calcul somme cumulative pour vitesse
-    const prefix = [0];
-    for (let i = 0; i < scores.length; i++) prefix.push(prefix[prefix.length - 1] + scores[i]);
-    function sumRange(a, b) { // inclusif a..b
-        return prefix[b + 1] - prefix[a];
+    } catch (err) {
+        console.error("⛔ Erreur Whisper:", err.message);
+        return null;
     }
-    for (let start = 0; start <= maxStart; start++) {
-        const end = Math.min(scores.length - 1, start + span - 1);
-        const wScore = sumRange(start, end) / (end - start + 1); // moyenne
-        windowScores.push({ start, end: start + span, score: wScore });
-    }
-    // Sort by descending score
-    windowScores.sort((a, b) => b.score - a.score);
+}
 
-    // 7. Non-overlapping selection of top N
-    const chosen = [];
-    for (const w of windowScores) {
-        if (chosen.length >= maxHighlights) break;
-        if (chosen.some(c => !(w.end <= c.start || w.start >= c.end))) continue; // overlap
-        const reasonParts = [];
-        // Indices of ts in the window
-        const tsCount = timestampSeconds.filter(ts => ts >= w.start && ts <= w.end).length;
-        if (tsCount) reasonParts.push(`${tsCount} timestamps`);
-        const cutsCount = sceneCuts.filter(sc => sc >= w.start && sc <= w.end).length;
-        if (cutsCount) reasonParts.push(`${cutsCount} coupes`);
-        if (reasonParts.length === 0) reasonParts.push("relative activity");
-        chosen.push({ start: w.start, end: Math.min(duration, w.end), score: w.score, reason: reasonParts.join(", ") });
+/**
+ * Génère les sous-titres pour un clip vidéo avec Whisper
+ * @param {string} videoFile - Vidéo à transcrire
+ * @param {string} outputDir - Dossier de sortie
+ * @param {number} clipNumber - Numéro du clip
+ * @param {string} ffmpegPath - Chemin vers ffmpeg
+ * @returns {Promise<string|null>} - Chemin du SRT ou null
+ */
+async function generateWhisperSubtitles(videoFile, outputDir, clipNumber, ffmpegPath) {
+    const tempWav = path.join(outputDir, `temp_audio_clip${clipNumber}.wav`);
+    const srtFile = path.join(outputDir, `clip_${clipNumber}_whisper.srt`);
+
+    // Extraire l'audio
+    if (!extractAudioForWhisper(videoFile, tempWav, ffmpegPath)) {
+        return null;
     }
 
-    // If nothing selected, fallback: start of the video
-    if (chosen.length === 0) {
-        chosen.push({ start: 0, end: Math.min(duration, span), score: 0, reason: "fallback" });
+    // Transcrire avec Whisper
+    const result = await transcribeWithWhisper(tempWav, srtFile, 'fr');
+
+    // Nettoyer le fichier WAV temporaire
+    if (fs.existsSync(tempWav)) {
+        fs.unlinkSync(tempWav);
     }
 
-    return chosen;
+    return result;
 }
 
 async function downloadFFmpeg(destFolder) {
@@ -554,55 +679,8 @@ async function downloadFFmpeg(destFolder) {
         }
     }
 
-    // Highlights mode?
-    const highlightAns = await ask("Automatically extract best moments (61s segments)? (y/n): ");
-    const highlightMode = highlightAns.trim().toLowerCase() === "y";
-    let highlightCount = 5;
-    let includeComments = true;
-    let rangesInput = "";
-    let useAllVideo = false;
-    let formatChoice, useBlurFill, autoSplitAns, autoSplit = false;
-
-    if (highlightMode) {
-        const hc = await ask("Number of highlight segments wanted? (default=5): ");
-        if (hc && !isNaN(parseInt(hc.trim(), 10)) && parseInt(hc.trim(), 10) > 0) {
-            highlightCount = parseInt(hc.trim(), 10);
-        }
-        const commentsAns = await ask("Include comment analysis (slower)? (Y/n): ");
-        includeComments = commentsAns.trim().toLowerCase() !== "n";
-        // formatChoice = await ask("Phone format (1) or landscape + blurred bars (2)? (1/2, default=1): ");
-        useBlurFill = true
-    } else {
-        // Ask if we want the whole video (classic mode)
-        const allVideoAns = await ask("Use the whole video? (y/n): ");
-        useAllVideo = allVideoAns.trim().toLowerCase() === "y";
-        if (useAllVideo) {
-            // formatChoice = await ask("Phone format (1) or landscape + blurred bars (2)? (1/2, default=1): ");
-            useBlurFill = true
-            autoSplitAns = await ask("Automatically split the video into segments? (Y/n): ");
-            autoSplit = autoSplitAns.trim().toLowerCase() !== "n";
-        } else {
-            rangesInput = await ask("Enter ranges (hh:mm:ss-hh:mm:ss, separated by commas):\n");
-            // formatChoice = await ask("Phone format (1) or landscape + blurred bars (2)? (1/2, default=1): ");
-            useBlurFill = true
-            autoSplitAns = await ask("Automatically split ranges into 61s segments? (Y/n): ");
-            autoSplit = autoSplitAns.trim().toLowerCase() !== "n";
-        }
-    }
-
-    // Ask for segment length if auto split is chosen
-    let segmentLength = 61; // default duration in seconds (était 60)
-    if (autoSplit) {
-        const segLenAns = await ask("Segment duration in seconds? (default=61): ");
-        if (segLenAns && segLenAns.trim() !== "") {
-            const maybeNum = parseInt(segLenAns.trim(), 10);
-            if (!isNaN(maybeNum) && maybeNum > 0) {
-                segmentLength = maybeNum;
-            } else {
-                console.log("Invalid value. Using 61s by default.");
-            }
-        }
-    }
+    const segmentDuration = 30; // Chaque segment fait 30 secondes
+    const useBlurFill = true;
 
     if (!fs.existsSync(ytDlp)) {
         console.error("⛔ yt-dlp.exe not found.");
@@ -684,81 +762,6 @@ async function downloadFFmpeg(destFolder) {
 
     // The video will be processed at normal speed, no acceleration
 
-    // Build ranges
-    let expandedRanges = [];
-    if (highlightMode) {
-        console.log("\n🔍 Calculating best moments…");
-        const highlights = getBestMoments(youtubeURL, { maxHighlights: highlightCount, spanSeconds: segmentLength, includeComments });
-        if (!highlights.length) {
-            console.log("⚠️ No highlight detected, fallback to start of video.");
-        } else {
-            console.log("✅ Highlights found:");
-            highlights.forEach((h, idx) => {
-                console.log(`#${idx + 1} ${h.start}s → ${h.end}s (${Math.round(h.end - h.start)}s) score=${h.score.toFixed(2)} reasons: ${h.reason}`);
-            });
-        }
-        expandedRanges = highlights.map(h => ({ start: h.start, end: h.end }));
-        if (!expandedRanges.length) expandedRanges = [{ start: 0, end: segmentLength }];
-    } else if (useAllVideo) {
-        // Determine video duration
-        let videoDuration = 0;
-        try {
-            const ffprobeOut = execSync(`"${ffmpeg}" -i "${tempFile}" -hide_banner`, { stdio: "pipe" });
-        } catch (err) {
-            const output = err.stderr ? err.stderr.toString() : "";
-            const match = output.match(/Duration: (\d+):(\d+):(\d+\.\d+)/);
-            if (match) {
-                const [, h, m, s] = match;
-                videoDuration = (+h) * 3600 + (+m) * 60 + (+s);
-            } else {
-                console.error("⛔ Could not determine video duration.");
-                process.exit(1);
-            }
-        }
-        // Split into 61s segments
-        const targetSegment = segmentLength;
-        if (autoSplit) {
-            expandedRanges = [];
-            let cur = 0;
-            while (cur + targetSegment <= videoDuration) {
-                expandedRanges.push({ start: cur, end: cur + targetSegment });
-                cur += targetSegment;
-            }
-            if (cur < videoDuration) expandedRanges.push({ start: cur, end: videoDuration });
-        } else {
-            expandedRanges = [{ start: 0, end: videoDuration }];
-        }
-    } else {
-        const ranges = rangesInput
-            .split(",")
-            .map(r => r.trim())
-            .filter(r => r.includes("-"))
-            .map(r => {
-                const [s, e] = r.split("-");
-                return { start: toSeconds(s), end: toSeconds(e) };
-            });
-        // Split into 61s segments
-        const targetSegment = segmentLength;
-        expandedRanges = autoSplit
-            ? ranges.flatMap(({ start, end }) => {
-                const segments = [];
-                if (end <= start) return segments;
-                let cur = start;
-                while (cur + targetSegment <= end) {
-                    segments.push({ start: cur, end: cur + targetSegment });
-                    cur += targetSegment;
-                }
-                if (cur < end) segments.push({ start: cur, end });
-                return segments;
-            })
-            : ranges;
-    }
-
-    console.log(`\n🧩 Segments to process: ${expandedRanges.length}`);
-    if (highlightMode) {
-        console.log("(Automatic highlights mode)");
-    }
-
     // Vérifier si le logo est activé et existe
     const logoFile = path.join(exeDir, EFFECTS.logo.file);
     const hasLogoFile = fs.existsSync(logoFile);
@@ -768,92 +771,217 @@ async function downloadFFmpeg(destFolder) {
 
     // Vérifier si le watermark existe
     const watermarkFile = path.join(exeDir, 'watermark.png');
-    // const hasWatermarkFile = fs.existsSync(watermarkFile);
     const hasWatermarkFile = false;
-    if (hasWatermarkFile) {
-        console.log(`✅ Watermark trouvé: watermark.png (sera appliqué sur la vidéo)`);
-    }
 
-    // Add logic to create a specific subfolder
-    const videoName = youtubeURL ? youtubeURL.split('v=')[1] || 'video' : 'video';
+    // Créer le dossier de sortie
     const downloadDate = new Date().toISOString().split('T')[0];
     let videoTitle = "video";
     if (youtubeURL) {
         try {
             const metadata = execSync(`"${ytDlp}" --get-title "${youtubeURL}"`, { encoding: "utf-8" });
-            videoTitle = metadata.trim().replace(/[^a-zA-Z0-9-_ ]/g, "_"); // Clean title
+            videoTitle = metadata.trim().replace(/[^a-zA-Z0-9-_ ]/g, "_");
         } catch {
             console.warn("⚠️ Could not retrieve video title. Using default name.");
         }
     }
-    // Update to replace spaces with underscores in title
     videoTitle = 'output_' + videoTitle.replace(/\s+/g, "_");
-    // Update to handle paths correctly in both Node.js and .exe cases
     const outputDir = path.join(exeDir, `${videoTitle}_${downloadDate}`);
     if (!fs.existsSync(outputDir)) {
         fs.mkdirSync(outputDir);
     }
 
-    console.log("\n🎭 MODE ANTI-DÉTECTION ACTIVÉ - Chaque segment aura des effets UNIQUES");
+    // 📝 Télécharger les sous-titres YouTube une seule fois
+    let youtubeSrtFile = null;
+    if (youtubeURL) {
+        youtubeSrtFile = downloadYoutubeSubtitles(youtubeURL, outputDir, ytDlp);
+    }
 
-    // Process each range with UNIQUE effects per segment
-    for (let i = 0; i < expandedRanges.length; i++) {
-        const { start, end } = expandedRanges[i];
-        if (end <= start) {
-            console.warn(`⚠️ Range ${i + 1} ignored (end ≤ start).`);
-            continue;
+    // 📋 PHASE 1: COLLECTE DE TOUS LES TIMECODES
+    console.log("\n" + "=".repeat(50));
+    console.log("📋 PHASE 1: DÉFINITION DES CLIPS");
+    console.log("=".repeat(50));
+
+    const allClipsData = []; // Stocke les données de tous les clips
+
+    let addingClips = true;
+    while (addingClips) {
+        const clipNum = allClipsData.length + 1;
+        console.log(`\n📹 === CLIP #${clipNum} ===`);
+        console.log("Entrez les 2 timecodes de début (format MM:SS ou HH:MM:SS).\n");
+
+        const timecode1 = await ask("Timecode segment 1 (ex: 1:30): ");
+        const timecode2 = await ask("Timecode segment 2 (ex: 5:45): ");
+
+        const userTimecodes = [timecode1, timecode2].map(tc => toSeconds(tc.trim()));
+        const expandedRanges = userTimecodes.map(start => ({
+            start: start,
+            end: start + segmentDuration
+        }));
+
+        allClipsData.push({ clipNumber: clipNum, ranges: expandedRanges });
+
+        // Afficher récapitulatif
+        console.log(`\n   ✅ Clip #${clipNum} enregistré:`);
+        expandedRanges.forEach((r, i) => {
+            const startMin = Math.floor(r.start / 60);
+            const startSec = r.start % 60;
+            console.log(`      Segment ${i + 1}: ${startMin}:${startSec.toString().padStart(2, '0')} → +30s`);
+        });
+
+        const another = await ask("\n➕ Ajouter un autre clip ? (o/n): ");
+        if (another.toLowerCase() !== "o" && another.toLowerCase() !== "oui" && another.toLowerCase() !== "y") {
+            addingClips = false;
         }
-        const duration = end - start;
+    }
 
-        // 🎲 GÉNÉRATION D'EFFETS UNIQUES POUR CE SEGMENT
-        const uniqueEffects = generateUniqueEffects();
-        const hasLogo = uniqueEffects.logo.enabled && hasLogoFile;
-        const hasWatermark = hasWatermarkFile;
+    // 🎬 PHASE 2: CRÉATION DE TOUS LES CLIPS
+    console.log("\n" + "=".repeat(50));
+    console.log(`🎬 PHASE 2: CRÉATION DE ${allClipsData.length} CLIP(S)`);
+    console.log("=".repeat(50));
 
-        // Construire les filtres avec les effets uniques
-        const videoFilter = buildVideoFilter(useBlurFill, hasLogo, hasWatermark, uniqueEffects);
-        const audioFilter = buildAudioFilter(uniqueEffects);
+    for (const clipData of allClipsData) {
+        const { clipNumber, ranges: expandedRanges } = clipData;
 
-        // 📝 MÉTADONNÉES UNIQUES pour éviter le fingerprinting
+        console.log(`\n${"─".repeat(40)}`);
+        console.log(`📹 Création du clip #${clipNumber}/${allClipsData.length}`);
+        console.log(`${"─".repeat(40)}`);
+
+        console.log("\n🎭 MODE ANTI-DÉTECTION ACTIVÉ - Effets UNIQUES");
+
+        // Stocker les chemins des segments temporaires pour la concaténation
+        const tempSegmentFiles = [];
+
+        // Process each range with UNIQUE effects per segment
+        for (let i = 0; i < expandedRanges.length; i++) {
+            const { start, end } = expandedRanges[i];
+            if (end <= start) {
+                console.warn(`⚠️ Range ${i + 1} ignored (end ≤ start).`);
+                continue;
+            }
+            const duration = end - start;
+
+            // 🎲 GÉNÉRATION D'EFFETS UNIQUES POUR CE SEGMENT
+            const uniqueEffects = generateUniqueEffects();
+            const hasLogo = uniqueEffects.logo.enabled && hasLogoFile;
+            const hasWatermark = hasWatermarkFile;
+
+            // Construire les filtres avec les effets uniques
+            const videoFilter = buildVideoFilter(useBlurFill, hasLogo, hasWatermark, uniqueEffects);
+            const audioFilter = buildAudioFilter(uniqueEffects);
+
+            // Fichier temporaire pour ce segment
+            const tempSegmentName = path.join(outputDir, `temp_segment_${i + 1}.mp4`);
+            tempSegmentFiles.push(tempSegmentName);
+
+            // Construire les inputs FFmpeg: vidéo + watermark (optionnel) + logo (optionnel)
+            const watermarkInput = hasWatermark ? `-i "${watermarkFile}" ` : '';
+            const logoInput = hasLogo ? `-i "${logoFile}" ` : '';
+            const needsFilterComplex = hasLogo || hasWatermark;
+            const filterFlag = needsFilterComplex ? '-filter_complex' : '-vf';
+
+            const cmd =
+                `"${ffmpeg}" -y -ss ${start} -t ${duration} -i "${tempFile}" ${watermarkInput}${logoInput}` +
+                `${filterFlag} ${videoFilter} -af ${audioFilter} ` +
+                `-c:v libx264 -preset ${uniqueEffects.preset} -crf ${uniqueEffects.crf} ` +
+                `-c:a aac -b:a ${Math.floor(randomInRange(120, 136))}k ` +
+                `"${tempSegmentName}"`;
+
+            console.log(`\n🔄 Extraction segment #${i + 1} (${duration}s)`);
+            console.log(`   🎲 Effets: sat=${uniqueEffects.saturation.toFixed(2)} hue=${uniqueEffects.hue.toFixed(1)}°${hasWatermark ? ' +watermark' : ''}`);
+            try {
+                execSync(cmd, { stdio: "inherit" });
+            } catch {
+                console.error(`⛔ Échec extraction segment #${i + 1}.`);
+            }
+        }
+
+        // 🎬 CONCATÉNATION des 2 segments en un seul clip de 1m
+        console.log("\n🎬 Concaténation des 2 segments en un clip de 1m...");
+
+        // Créer le fichier de liste pour ffmpeg concat
+        const concatListFile = path.join(outputDir, "concat_list.txt");
+        const concatListContent = tempSegmentFiles.map(f => `file '${f.replace(/\\/g, "/")}'`).join("\n");
+        fs.writeFileSync(concatListFile, concatListContent);
+
+        // 📝 MÉTADONNÉES UNIQUES pour le clip final
         const uniqueId = `${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
-        const fakeDate = new Date(Date.now() - Math.floor(Math.random() * 86400000 * 30)); // Date aléatoire dans les 30 derniers jours
+        const fakeDate = new Date(Date.now() - Math.floor(Math.random() * 86400000 * 30));
         const metadataArgs = `-metadata title="clip_${uniqueId}" ` +
             `-metadata creation_time="${fakeDate.toISOString()}" ` +
             `-metadata encoder="custom_${Math.random().toString(36).slice(2, 8)}" ` +
             `-metadata comment="${Math.random().toString(36).slice(2, 18)}"`;
 
-        const outName = path.join(outputDir, `segment_${i + 1}_${start}s_${end}s_${useBlurFill ? "blur" : "crop"}.mp4`);
+        const finalOutputName = path.join(outputDir, `clip_${clipNumber}_1m.mp4`);
 
-        // Construire les inputs FFmpeg: vidéo + watermark (optionnel) + logo (optionnel)
-        // Ordre: [0:v]=vidéo, [1:v]=watermark, [2:v]=logo (ou [1:v]=logo si pas de watermark)
-        const watermarkInput = hasWatermark ? `-i "${watermarkFile}" ` : '';
-        const logoInput = hasLogo ? `-i "${logoFile}" ` : '';
-        const needsFilterComplex = hasLogo || hasWatermark;
-        const filterFlag = needsFilterComplex ? '-filter_complex' : '-vf';
+        const concatCmd = `"${ffmpeg}" -y -f concat -safe 0 -i "${concatListFile}" -c copy ${metadataArgs} "${finalOutputName}"`;
 
-        const cmd =
-            `"${ffmpeg}" -y -ss ${start} -t ${duration} -i "${tempFile}" ${watermarkInput}${logoInput}` +
-            `${filterFlag} ${videoFilter} -af ${audioFilter} ` +
-            `-c:v libx264 -preset ${uniqueEffects.preset} -crf ${uniqueEffects.crf} ` +
-            `-c:a aac -b:a ${Math.floor(randomInRange(120, 136))}k ` +
-            `${metadataArgs} "${outName}"`;
-
-        console.log(`\n🔄 Processing range #${i + 1} → ${outName}`);
-        console.log(`   🎲 Effets: sat=${uniqueEffects.saturation.toFixed(2)} hue=${uniqueEffects.hue.toFixed(1)}° speed=${uniqueEffects.speed.toFixed(3)} pitch=${uniqueEffects.pitchShift.toFixed(3)}${hasWatermark ? ' +watermark' : ''}`);
         try {
-            execSync(cmd, { stdio: "inherit" });
+            execSync(concatCmd, { stdio: "inherit" });
+            console.log(`\n✅ Clip #${clipNumber} créé: ${finalOutputName}`);
+
+            // Supprimer les fichiers temporaires
+            console.log("🧹 Nettoyage des segments temporaires...");
+            tempSegmentFiles.forEach(f => {
+                if (fs.existsSync(f)) fs.unlinkSync(f);
+            });
+            if (fs.existsSync(concatListFile)) fs.unlinkSync(concatListFile);
+            console.log("✅ Fichiers temporaires supprimés.");
+
+            // 🎤 SOUS-TITRES AUTOMATIQUES (Whisper ou YouTube)
+            let clipSrtFile = null;
+
+            // Priorité 1: Whisper (transcription locale)
+            if (whisper) {
+                console.log("\n🎤 Génération des sous-titres avec Whisper...");
+                clipSrtFile = await generateWhisperSubtitles(finalOutputName, outputDir, clipNumber, ffmpeg);
+            }
+
+            // Priorité 2: Sous-titres YouTube (si Whisper non disponible ou a échoué)
+            if (!clipSrtFile && youtubeSrtFile) {
+                console.log("\n📝 Extraction des sous-titres YouTube pour ce clip...");
+                const ytSrtFile = path.join(outputDir, `clip_${clipNumber}_subs.srt`);
+                clipSrtFile = extractSubtitlesForSegments(youtubeSrtFile, expandedRanges, ytSrtFile);
+            }
+
+            // Incrustation des sous-titres si disponibles
+            if (clipSrtFile) {
+                const subtitledOutput = path.join(outputDir, `clip_${clipNumber}_1m_subtitled.mp4`);
+
+                if (burnSubtitles(finalOutputName, clipSrtFile, subtitledOutput, ffmpeg)) {
+                    // Remplacer le fichier original par la version sous-titrée
+                    fs.unlinkSync(finalOutputName);
+                    fs.renameSync(subtitledOutput, finalOutputName);
+                    console.log("✅ Vidéo finale avec sous-titres incrustés!");
+                }
+
+                // Supprimer le fichier SRT du clip après utilisation
+                if (fs.existsSync(clipSrtFile)) fs.unlinkSync(clipSrtFile);
+            }
+
         } catch {
-            console.error(`⛔ Failed to cut range #${i + 1}.`);
+            console.error("⛔ Échec de la concaténation.");
+        }
+    } // Fin de la boucle for
+
+    // 🧹 NETTOYAGE FINAL
+    console.log("\n" + "=".repeat(50));
+    console.log("🧹 NETTOYAGE");
+    console.log("=".repeat(50));
+
+    const del = await ask("\nSupprimer video_temp.mp4 ? (o/n): ");
+    if (del.toLowerCase() === "o" || del.toLowerCase() === "y") {
+        if (fs.existsSync(tempFile)) {
+            fs.unlinkSync(tempFile);
+            console.log("✅ Fichier temporaire supprimé.");
         }
     }
 
-    const del = await ask("\nDelete video_temp.mp4? (y/n): ");
-    if (del.toLowerCase() === "y" && fs.existsSync(tempFile)) {
-        fs.unlinkSync(tempFile);
-        console.log("✅ Temporary file deleted.");
+    // Supprimer le fichier de sous-titres YouTube
+    if (youtubeSrtFile && fs.existsSync(youtubeSrtFile)) {
+        fs.unlinkSync(youtubeSrtFile);
     }
 
-    console.log("\n✅ All done!");
-    await ask("Press Enter to exit...");
+    console.log(`\n✅ Terminé! ${allClipsData.length} clip(s) créé(s) dans: ${outputDir}`);
+    await ask("Appuyez sur Entrée pour quitter...");
     rl.close();
 })();
