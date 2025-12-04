@@ -704,7 +704,10 @@ async function downloadFFmpeg(destFolder) {
         }
     }
 
-    const segmentDuration = 30; // Chaque segment fait 30 secondes
+    const segmentDuration = 21; // Chaque segment fait 21 secondes
+    const gapBetweenSegments = 3; // 3 secondes entre chaque segment
+    const clipTotalDuration = segmentDuration * 3 + gapBetweenSegments * 2; // 21+3+21+3+21 = 69s par clip, mais on prend 63s pour la prochaine vidéo
+    const clipAdvance = 63; // Avance de 63s entre chaque clip (pas de gap entre vidéos)
     const useBlurFill = true;
 
     if (!fs.existsSync(ytDlp)) {
@@ -821,42 +824,97 @@ async function downloadFFmpeg(destFolder) {
         youtubeSrtFile = downloadYoutubeSubtitles(youtubeURL, outputDir, ytDlp);
     }
 
-    // 📋 PHASE 1: COLLECTE DE TOUS LES TIMECODES
+    // 📋 PHASE 1: GÉNÉRATION AUTOMATIQUE DES CLIPS
     console.log("\n" + "=".repeat(50));
-    console.log("📋 PHASE 1: DÉFINITION DES CLIPS");
+    console.log("📋 PHASE 1: GÉNÉRATION AUTOMATIQUE DES CLIPS");
     console.log("=".repeat(50));
 
-    const allClipsData = []; // Stocke les données de tous les clips
+    // Obtenir la durée totale de la vidéo
+    let videoDuration = 0;
+    try {
+        const durationOutput = execSync(
+            `"${ffmpeg}" -i "${tempFile}" 2>&1`,
+            { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+        ).toString();
+        const durationMatch = durationOutput.match(/Duration: (\d{2}):(\d{2}):(\d{2})/);
+        if (durationMatch) {
+            videoDuration = parseInt(durationMatch[1]) * 3600 + parseInt(durationMatch[2]) * 60 + parseInt(durationMatch[3]);
+        }
+    } catch (err) {
+        // ffmpeg retourne une erreur mais affiche quand même la durée
+        const output = err.stderr ? err.stderr.toString() : err.stdout ? err.stdout.toString() : '';
+        const durationMatch = output.match(/Duration: (\d{2}):(\d{2}):(\d{2})/);
+        if (durationMatch) {
+            videoDuration = parseInt(durationMatch[1]) * 3600 + parseInt(durationMatch[2]) * 60 + parseInt(durationMatch[3]);
+        }
+    }
 
-    let addingClips = true;
-    while (addingClips) {
-        const clipNum = allClipsData.length + 1;
-        console.log(`\n📹 === CLIP #${clipNum} ===`);
-        console.log("Entrez les 2 timecodes de début (format MM:SS ou HH:MM:SS).\n");
+    if (videoDuration === 0) {
+        console.error("⛔ Impossible de déterminer la durée de la vidéo.");
+        process.exit(1);
+    }
 
-        const timecode1 = await ask("Timecode segment 1 (ex: 1:30): ");
-        const timecode2 = await ask("Timecode segment 2 (ex: 5:45): ");
+    const videoDurationMin = Math.floor(videoDuration / 60);
+    const videoDurationSec = videoDuration % 60;
+    console.log(`\n📊 Durée de la vidéo: ${videoDurationMin}:${videoDurationSec.toString().padStart(2, '0')} (${videoDuration}s)`);
 
-        const userTimecodes = [timecode1, timecode2].map(tc => toSeconds(tc.trim()));
-        const expandedRanges = userTimecodes.map(start => ({
-            start: start,
-            end: start + segmentDuration
-        }));
+    // Demander le timecode de départ
+    const startTimecode = await ask("\nTimecode de départ (ex: 1:30, défaut 0:00): ");
+    let currentPosition = startTimecode.trim() ? toSeconds(startTimecode.trim()) : 0;
+
+    // Générer automatiquement tous les clips
+    // Structure d'un clip: segment1(21s) + gap(3s) + segment2(21s) + gap(3s) + segment3(21s) = 69s de vidéo source
+    // Mais on avance de 63s pour le prochain clip (les 3 segments de 21s)
+    const allClipsData = [];
+    let clipNum = 0;
+
+    while (currentPosition + clipAdvance <= videoDuration) {
+        clipNum++;
+
+        // Calculer les 3 segments pour ce clip
+        // Segment 1: currentPosition → currentPosition + 21s
+        // Segment 2: currentPosition + 21s + 3s → currentPosition + 21s + 3s + 21s
+        // Segment 3: currentPosition + 21s + 3s + 21s + 3s → currentPosition + 21s + 3s + 21s + 3s + 21s
+        const seg1Start = currentPosition;
+        const seg2Start = currentPosition + segmentDuration + gapBetweenSegments; // +21s +3s
+        const seg3Start = currentPosition + (segmentDuration + gapBetweenSegments) * 2; // +21s +3s +21s +3s
+
+        const expandedRanges = [
+            { start: seg1Start, end: seg1Start + segmentDuration },
+            { start: seg2Start, end: seg2Start + segmentDuration },
+            { start: seg3Start, end: seg3Start + segmentDuration }
+        ];
+
+        // Vérifier que le dernier segment ne dépasse pas la durée
+        if (expandedRanges[2].end > videoDuration) {
+            break;
+        }
 
         allClipsData.push({ clipNumber: clipNum, ranges: expandedRanges });
 
-        // Afficher récapitulatif
-        console.log(`\n   ✅ Clip #${clipNum} enregistré:`);
-        expandedRanges.forEach((r, i) => {
-            const startMin = Math.floor(r.start / 60);
-            const startSec = r.start % 60;
-            console.log(`      Segment ${i + 1}: ${startMin}:${startSec.toString().padStart(2, '0')} → +30s`);
-        });
+        // Avancer de 63s pour le prochain clip
+        currentPosition += clipAdvance;
+    }
 
-        const another = await ask("\n➕ Ajouter un autre clip ? (o/n): ");
-        if (another.toLowerCase() !== "o" && another.toLowerCase() !== "oui" && another.toLowerCase() !== "y") {
-            addingClips = false;
-        }
+    // Afficher le récapitulatif
+    console.log(`\n✅ ${allClipsData.length} clip(s) seront générés:\n`);
+    allClipsData.forEach(clip => {
+        const r = clip.ranges;
+        const formatTime = (s) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
+        console.log(`   Clip #${clip.clipNumber}: ${formatTime(r[0].start)}-${formatTime(r[0].end)} | ${formatTime(r[1].start)}-${formatTime(r[1].end)} | ${formatTime(r[2].start)}-${formatTime(r[2].end)}`);
+    });
+
+    if (allClipsData.length === 0) {
+        console.log("⚠️ Aucun clip à générer (vidéo trop courte ou timecode de départ trop avancé).");
+        rl.close();
+        process.exit(0);
+    }
+
+    const confirm = await ask(`\n▶️ Lancer la génération de ${allClipsData.length} clip(s) ? (o/n): `);
+    if (confirm.toLowerCase() !== "o" && confirm.toLowerCase() !== "oui" && confirm.toLowerCase() !== "y") {
+        console.log("❌ Génération annulée.");
+        rl.close();
+        process.exit(0);
     }
 
     // 🎬 PHASE 2: CRÉATION DE TOUS LES CLIPS
@@ -920,8 +978,8 @@ async function downloadFFmpeg(destFolder) {
             }
         }
 
-        // 🎬 CONCATÉNATION des 2 segments en un seul clip de 1m
-        console.log("\n🎬 Concaténation des 2 segments en un clip de 1m...");
+        // 🎬 CONCATÉNATION des 3 segments en un seul clip (~1m)
+        console.log("\n🎬 Concaténation des 3 segments en un clip de ~1m...");
 
         // Créer le fichier de liste pour ffmpeg concat
         const concatListFile = path.join(outputDir, "concat_list.txt");
