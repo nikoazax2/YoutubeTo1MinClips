@@ -820,7 +820,7 @@ async function downloadFFmpeg(destFolder) {
 
     // 📝 Télécharger les sous-titres YouTube une seule fois
     let youtubeSrtFile = null;
-    if (youtubeURL) {
+    if (youtubeURL && 1 == 2) {
         youtubeSrtFile = downloadYoutubeSubtitles(youtubeURL, outputDir, ytDlp);
     }
 
