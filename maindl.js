@@ -708,7 +708,6 @@ async function downloadFFmpeg(destFolder) {
     const gapBetweenSegments = 3; // 3 secondes entre chaque segment
     const clipTotalDuration = segmentDuration * 3 + gapBetweenSegments * 2; // 21+3+21+3+21 = 69s par clip, mais on prend 63s pour la prochaine vidéo
     const clipAdvance = 63; // Avance de 63s entre chaque clip (pas de gap entre vidéos)
-    const useBlurFill = true;
 
     if (!fs.existsSync(ytDlp)) {
         console.error("⛔ yt-dlp.exe not found.");
@@ -861,6 +860,13 @@ async function downloadFFmpeg(destFolder) {
     // Demander le timecode de départ
     const startTimecode = await ask("\nTimecode de départ (ex: 1:30, défaut 0:00): ");
     let currentPosition = startTimecode.trim() ? toSeconds(startTimecode.trim()) : 0;
+
+    // Demander le mode vidéo: blur fill ou plein écran (crop centré)
+    console.log("\n📐 Mode vidéo:");
+    console.log("   1. Fond flou (blur) - la vidéo est centrée avec un fond flou");
+    console.log("   2. Plein écran (crop) - la vidéo est centrée et recadrée (on perd les bords)");
+    const videoModeChoice = await ask("Choisir le mode (1 ou 2, défaut 1): ");
+    const useBlurFill = videoModeChoice.trim() !== "2";
 
     // Générer automatiquement tous les clips
     // Structure d'un clip: segment1(21s) + gap(3s) + segment2(21s) + gap(3s) + segment3(21s) = 69s de vidéo source
