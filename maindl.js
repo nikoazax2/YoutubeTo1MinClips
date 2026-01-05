@@ -102,8 +102,8 @@ function generateUniqueEffects() {
         blur: randomInRange(0.2, 0.6),
 
         // Ondulation/vaguelettes subtiles (décalage chromatique quasi invisible)
-        rgbaShiftH: randomInRange(-2, 2),           // Décalage horizontal des canaux
-        rgbaShiftV: randomInRange(-1, 1),           // Décalage vertical des canaux
+        rgbaShiftH: randomInRange(0, 0),           // Décalage horizontal des canaux
+        rgbaShiftV: randomInRange(0, 0),           // Décalage vertical des canaux
 
         // Vignette TRÈS subtile (quasi invisible mais modifie le fingerprint)
         // angle proche de PI/2 (1.57) = très peu de vignette
